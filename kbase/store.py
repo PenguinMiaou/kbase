@@ -387,11 +387,20 @@ class KBaseStore:
             c.execute(f'DROP TABLE IF EXISTS "{row["table_name"]}"')
         c.execute("DELETE FROM tabular_registry WHERE file_id = ?", (file_id,))
 
-        # Remove from ChromaDB
+        # Remove from ChromaDB (try both where filter and id prefix)
         try:
             existing = self.collection.get(where={"file_id": file_id})
             if existing["ids"]:
                 self.collection.delete(ids=existing["ids"])
+        except Exception:
+            pass
+        # Fallback: delete by ID prefix (file_id_chunkindex)
+        try:
+            all_data = self.collection.get()
+            orphan_ids = [aid for aid, meta in zip(all_data["ids"], all_data["metadatas"])
+                          if meta.get("file_id") == file_id]
+            if orphan_ids:
+                self.collection.delete(ids=orphan_ids)
         except Exception:
             pass
 

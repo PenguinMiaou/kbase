@@ -1558,7 +1558,11 @@ function pickSet(el,type,key){
   else if(type==='embedding'){s.embedding_model=key;showProviderConfig(key,'embedding');}
   else if(type==='whisper'){s.whisper_model=key;showProviderConfig(key,'whisper');}
   else if(type==='language')s.language=key;
-  else if(type==='buddy')s.buddy_preset=key;
+  else if(type==='buddy'){
+    s.buddy_preset=key;
+    const box=document.getElementById('custom-buddy-box');
+    if(key!=='custom'&&box)box.remove();
+  }
 }
 
 async function saveAllSettings(){
