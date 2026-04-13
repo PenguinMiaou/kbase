@@ -17,41 +17,45 @@ def hybrid_search(store: KBaseStore, query: str, top_k: int = 10,
                   file_type: str = None, time_decay: bool = True,
                   dedup: bool = True, recursive: bool = True,
                   llm_func=None) -> dict:
-    """Full-pipeline enhanced search with HyDE + Multi-Query + Parent retrieval.
+    """Adaptive progressive search — escalates techniques based on result quality.
 
-    Pipeline: expand → HyDE → multi-query → retrieve → fuse → dedup → rerank → parent-expand
+    Level 1: keyword + semantic (fast, <1s)
+    Level 2: + query expansion + rerank (if L1 top score < threshold)
+    Level 3: + HyDE + multi-query (if L2 still weak, uses LLM)
+    Level 4: + recursive broadening (last resort)
     """
     methods = ["semantic", "keyword"]
+    GOOD_SCORE = 0.3   # L1 result good enough, skip escalation
+    OK_SCORE = 0.1     # L2 acceptable, skip L3
 
-    # 1. Query expansion (synonym-based)
-    expanded = expand_query(query) if use_expand else query
-    if expanded != query:
-        methods.append("expanded")
-
-    # 1b. HyDE — generate hypothetical document for better embedding match
-    hyde_query = generate_hyde(query, llm_func=llm_func)
-    if hyde_query != query:
-        methods.append("hyde")
-
-    # 1c. Multi-Query — search from multiple angles
-    multi_queries = generate_multi_queries(query, llm_func=llm_func, n=2)
-    if len(multi_queries) > 1:
-        methods.append(f"multi-query({len(multi_queries)})")
-
-    # 2. Multi-path retrieval (over-fetch aggressively for better recall)
+    # ── Level 1: Basic retrieval ──
     fetch_k = max(top_k * 5, 50)
-
-    # Semantic: original query + HyDE + multi-queries
     semantic_results = store.semantic_search(query, top_k=fetch_k, file_type=file_type)
-    if hyde_query != query:
-        hyde_results = store.semantic_search(hyde_query, top_k=fetch_k, file_type=file_type)
-        semantic_results = _dedupe_merge(semantic_results, hyde_results)
-    for mq in multi_queries[1:]:  # Skip first (original query)
-        mq_results = store.semantic_search(mq, top_k=fetch_k // 2, file_type=file_type)
-        semantic_results = _dedupe_merge(semantic_results, mq_results)
+
+    # Quick check: if L1 already has great results, skip heavy processing
+    l1_top = max((r.get("score", 0) for r in semantic_results[:3]), default=0)
+
+    # ── Level 2: Query expansion + synonym (always cheap, always helpful) ──
+    expanded = expand_query(query) if use_expand else query
     if expanded != query:
         semantic_expanded = store.semantic_search(expanded, top_k=fetch_k, file_type=file_type)
         semantic_results = _dedupe_merge(semantic_results, semantic_expanded)
+        methods.append("expanded")
+
+    # ── Level 3: HyDE + Multi-Query (only if L1/L2 scores are weak AND llm_func available) ──
+    if llm_func and l1_top < GOOD_SCORE:
+        hyde_query = generate_hyde(query, llm_func=llm_func)
+        if hyde_query != query:
+            hyde_results = store.semantic_search(hyde_query, top_k=fetch_k, file_type=file_type)
+            semantic_results = _dedupe_merge(semantic_results, hyde_results)
+            methods.append("hyde")
+
+        multi_queries = generate_multi_queries(query, llm_func=llm_func, n=2)
+        if len(multi_queries) > 1:
+            for mq in multi_queries[1:]:
+                mq_results = store.semantic_search(mq, top_k=fetch_k // 2, file_type=file_type)
+                semantic_results = _dedupe_merge(semantic_results, mq_results)
+            methods.append(f"multi-query({len(multi_queries)})")
     segmented = segment_text(query)
     keyword_results = store.keyword_search(segmented, top_k=fetch_k)
 
