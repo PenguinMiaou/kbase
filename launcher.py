@@ -12,6 +12,10 @@ if getattr(sys, 'frozen', False):
     # Ensure bundled dir is in path
     bundle_dir = sys._MEIPASS
     os.environ['PATH'] = bundle_dir + os.pathsep + os.environ.get('PATH', '')
+    # Add user-installed packages (sentence_transformers etc.)
+    user_pkgs = os.path.join(os.path.expanduser('~'), '.kbase', 'python_packages')
+    if os.path.isdir(user_pkgs) and user_pkgs not in sys.path:
+        sys.path.insert(0, user_pkgs)
 
 
 def start_server():

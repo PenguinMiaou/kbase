@@ -882,12 +882,33 @@ Question: {question}"""
 
         def do_download():
             try:
-                q.put(json.dumps({"status": "downloading", "message": f"Downloading {model_name}..."}))
+                # In frozen/DMG mode, install sentence_transformers first if needed
+                if getattr(sys, 'frozen', False):
+                    try:
+                        import sentence_transformers
+                    except ImportError:
+                        q.put(json.dumps({"status": "installing", "message": "Installing sentence_transformers (one-time setup)...", "progress": 10}))
+                        import subprocess
+                        pip_target = str(Path.home() / ".kbase" / "python_packages")
+                        Path(pip_target).mkdir(parents=True, exist_ok=True)
+                        result = subprocess.run(
+                            [sys.executable, "-m", "pip", "install",
+                             "--target", pip_target, "sentence_transformers", "--quiet"],
+                            capture_output=True, text=True, timeout=600,
+                        )
+                        if result.returncode != 0:
+                            q.put(json.dumps({"status": "error", "message": f"pip install failed: {result.stderr[:200]}"}))
+                            return
+                        if pip_target not in sys.path:
+                            sys.path.insert(0, pip_target)
+                        q.put(json.dumps({"status": "installing", "message": "sentence_transformers installed!", "progress": 40}))
+
+                q.put(json.dumps({"status": "downloading", "message": f"Downloading {model_name}...", "progress": 50}))
                 from sentence_transformers import SentenceTransformer
                 model = SentenceTransformer(model_name)
-                q.put(json.dumps({"status": "done", "message": "Download complete!"}))
+                q.put(json.dumps({"status": "done", "message": "Model ready! Restart KBase for best results.", "progress": 100}))
             except Exception as e:
-                q.put(json.dumps({"status": "error", "message": str(e)}))
+                q.put(json.dumps({"status": "error", "message": str(e)[:300]}))
             finally:
                 q.put(None)
 

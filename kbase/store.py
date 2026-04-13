@@ -67,7 +67,7 @@ def _create_embedding_function(model_key: str = None):
 
 
 def _safe_sentence_transformer(model_name: str):
-    """Try SentenceTransformer, fallback to ChromaDB default if unavailable."""
+    """Try SentenceTransformer, fallback to ChromaDB default + trigger background install."""
     try:
         return embedding_functions.SentenceTransformerEmbeddingFunction(
             model_name=model_name
@@ -75,11 +75,49 @@ def _safe_sentence_transformer(model_name: str):
     except (ValueError, ImportError):
         import sys
         if getattr(sys, 'frozen', False):
-            # In DMG/frozen mode, sentence_transformers may not be available
-            # Use ChromaDB's built-in default embedding (all-MiniLM-L6-v2 via onnxruntime)
-            print(f"[KBase] sentence_transformers not available in packaged mode, using ChromaDB default embedding")
+            # In DMG mode: use ChromaDB default now, install sentence_transformers in background
+            print(f"[KBase] sentence_transformers not available, using default embedding. Installing in background...")
+            _background_install_st(model_name)
             return embedding_functions.DefaultEmbeddingFunction()
         raise
+
+
+_st_install_started = False
+
+def _background_install_st(model_name: str):
+    """Background install sentence_transformers + download model. Next restart will use it."""
+    global _st_install_started
+    if _st_install_started:
+        return
+    _st_install_started = True
+
+    import threading, subprocess, sys
+    def do_install():
+        try:
+            # Use the bundled Python to pip install into user site-packages
+            pip_target = str(Path.home() / ".kbase" / "python_packages")
+            Path(pip_target).mkdir(parents=True, exist_ok=True)
+
+            print(f"[KBase] Installing sentence_transformers to {pip_target} ...")
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install",
+                 "--target", pip_target,
+                 "sentence_transformers", "--quiet"],
+                timeout=600, capture_output=True,
+            )
+            # Add to sys.path so next KBaseStore() init can find it
+            if pip_target not in sys.path:
+                sys.path.insert(0, pip_target)
+
+            # Pre-download the model
+            print(f"[KBase] Downloading model {model_name} ...")
+            from sentence_transformers import SentenceTransformer
+            SentenceTransformer(model_name)
+            print(f"[KBase] Model {model_name} ready! Restart KBase for optimal Chinese search.")
+        except Exception as e:
+            print(f"[KBase] Background install failed: {e}")
+
+    threading.Thread(target=do_install, daemon=True).start()
 
 
 class KBaseStore:

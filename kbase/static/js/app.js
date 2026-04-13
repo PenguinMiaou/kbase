@@ -781,7 +781,10 @@ async function autoGenerateTitle(){
 async function switchConv(id){
   convId=id;localStorage.setItem('kbase-conv-id',id);
   document.getElementById('chat-messages').innerHTML='';
+  document.getElementById('chat-welcome').style.display='none';
   convTitle='';convTitleManual=false;
+  // Switch to chat tab if not already there
+  switchTab('chat');
   await restoreConversation();
   loadConvList();
 }
@@ -1171,17 +1174,23 @@ function showProviderConfig(key,type){
     // Local downloadable models (embedding / whisper)
     const size=m.desc||'';
     const st=_modelStatus[key];
-    const dlStatus=st?(st.downloaded
-      ?'<span style="color:var(--green);font-weight:500;">Already downloaded</span>'
-      :'<span style="color:var(--yellow);font-weight:500;">Not yet downloaded</span> — will auto-download on first use')
-      :'<span style="color:var(--text-muted);">Auto-download on first use</span>';
+    const isDownloaded=st&&st.downloaded;
+    const dlBtnId='dl-btn-'+key.replace(/[^a-z0-9]/gi,'-');
+    const dlBarId='dl-bar-'+key.replace(/[^a-z0-9]/gi,'-');
+    const dlMsgId='dl-msg-'+key.replace(/[^a-z0-9]/gi,'-');
     html+=`<div style="padding:8px;border:1px solid var(--border);border-radius:6px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
         <span style="font-size:12px;color:var(--text-dim);">Local model — no API key needed</span>
-        <span style="font-size:11px;">${dlStatus}</span>
+        <span style="font-size:11px;">${isDownloaded
+          ?'<span style="color:var(--green);font-weight:500;">Downloaded</span>'
+          :`<button id="${dlBtnId}" onclick="downloadModel('${esc(m.name)}','${dlBtnId}','${dlBarId}','${dlMsgId}')" style="padding:4px 12px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:11px;font-weight:500;">Download</button>`
+        }</span>
       </div>
       <div style="font-size:11px;color:var(--text-muted);">${size}</div>
-      <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Cached in <code>~/.cache/</code></div>
+      <div id="${dlBarId}" style="display:none;margin-top:6px;height:4px;background:var(--border);border-radius:2px;overflow:hidden;">
+        <div style="height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width 0.3s;"></div>
+      </div>
+      <div id="${dlMsgId}" style="font-size:10px;color:var(--text-muted);margin-top:4px;"></div>
     </div>`;
   }else if(m.type==='cli'){
     html+=`<div style="padding:8px;border:1px solid var(--border);border-radius:6px;">
@@ -1288,6 +1297,44 @@ async function saveAllSettings(){
   document.getElementById('set-save-msg').innerHTML='<span class="save-ok" style="display:inline-flex;align-items:center;gap:4px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg> Settings saved!</span>';
   setTimeout(()=>document.getElementById('set-save-msg').innerHTML='',3000);
   await loadSettings();
+}
+
+// === Model Download ===
+function downloadModel(modelName, btnId, barId, msgId){
+  const btn=document.getElementById(btnId);
+  const bar=document.getElementById(barId);
+  const msg=document.getElementById(msgId);
+  if(btn)btn.disabled=true;
+  if(btn)btn.textContent='Downloading...';
+  if(bar)bar.style.display='block';
+
+  const evtSrc=new EventSource('/api/model-download?model_name='+encodeURIComponent(modelName));
+  evtSrc.onmessage=function(e){
+    try{
+      const d=JSON.parse(e.data);
+      if(msg)msg.textContent=d.message||'';
+      const pct=d.progress||0;
+      if(bar){
+        const inner=bar.querySelector('div');
+        if(inner)inner.style.width=pct+'%';
+      }
+      if(d.status==='done'){
+        evtSrc.close();
+        if(btn){btn.textContent='Downloaded';btn.style.background='var(--green)';}
+        if(msg)msg.innerHTML='<span style="color:var(--green);">Ready! Restart for best performance.</span>';
+        loadModelStatus();
+      }else if(d.status==='error'){
+        evtSrc.close();
+        if(btn){btn.textContent='Retry';btn.disabled=false;btn.style.background='var(--red,#ef4444)';}
+        if(msg)msg.innerHTML=`<span style="color:var(--red,#ef4444);">${esc(d.message)}</span>`;
+      }
+    }catch(err){}
+  };
+  evtSrc.onerror=function(){
+    evtSrc.close();
+    if(btn){btn.textContent='Retry';btn.disabled=false;}
+    if(msg)msg.textContent='Connection lost. Try again.';
+  };
 }
 
 // === Auto-Update ===
