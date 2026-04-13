@@ -89,6 +89,10 @@ def hybrid_search(store: KBaseStore, query: str, top_k: int = 10,
         if len(fused) < before:
             methods.append(f"dedup(-{before - len(fused)})")
 
+    # 5b. Per-file aggregation: max 3 chunks per file to ensure diversity
+    fused = _aggregate_per_file(fused, max_per_file=3)
+    methods.append("file-agg")
+
     # 6. Re-rank top results
     if use_rerank and fused:
         candidates = fused[:top_k * 3]
@@ -236,6 +240,35 @@ def _apply_directory_priority(results: list) -> list:
 
     results.sort(key=lambda x: x.get("rerank_score", x.get("rrf_score", x.get("score", 0))), reverse=True)
     return results
+
+
+def _aggregate_per_file(results: list, max_per_file: int = 3) -> list:
+    """Limit chunks per file to ensure result diversity.
+
+    Keeps top N chunks from each file, interleaved by rank to maintain
+    overall score ordering while preventing one file from dominating.
+    """
+    if not results:
+        return results
+
+    file_counts = {}
+    kept = []
+    overflow = []
+
+    for r in results:
+        fpath = r.get("metadata", {}).get("file_path", "")
+        count = file_counts.get(fpath, 0)
+        if count < max_per_file:
+            kept.append(r)
+            file_counts[fpath] = count + 1
+        else:
+            overflow.append(r)
+
+    # If we don't have enough results, add overflow
+    if len(kept) < 10 and overflow:
+        kept.extend(overflow[:10 - len(kept)])
+
+    return kept
 
 
 def _deduplicate_chunks(results: list, threshold: float = 0.85) -> list:
