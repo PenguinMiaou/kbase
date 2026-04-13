@@ -167,6 +167,64 @@ WHISPER_MODELS = {
 
 DEFAULT_WHISPER_MODEL = os.environ.get("KBASE_WHISPER_MODEL", "whisper-base")
 
+# Vision models for image description in documents
+VISION_MODELS = {
+    # --- Global ---
+    "gpt-4o-mini": {
+        "name": "GPT-4o Mini", "type": "openai", "model": "gpt-4o-mini",
+        "desc": "OpenAI - fast and cheap vision", "group": "global",
+        "key_env": "OPENAI_API_KEY",
+        "logo": "/static/logos/gpt.png",
+    },
+    "gpt-4o": {
+        "name": "GPT-4o", "type": "openai", "model": "gpt-4o",
+        "desc": "OpenAI - best quality vision", "group": "global",
+        "key_env": "OPENAI_API_KEY",
+        "logo": "/static/logos/gpt.png",
+    },
+    "gemini-flash": {
+        "name": "Gemini 2.5 Flash", "type": "gemini", "model": "gemini-2.5-flash",
+        "desc": "Google - fast, free tier available", "group": "global",
+        "key_env": "GEMINI_API_KEY",
+        "logo": "/static/logos/gemini-new.webp",
+        "signup_url": "https://aistudio.google.com/apikey",
+    },
+    "claude-vision": {
+        "name": "Claude Sonnet", "type": "anthropic", "model": "claude-sonnet-4-20250514",
+        "desc": "Anthropic - excellent for charts/diagrams", "group": "global",
+        "key_env": "ANTHROPIC_API_KEY",
+        "logo": "/static/logos/claude.svg",
+    },
+    # --- China (国内) ---
+    "qwen-vl": {
+        "name": "Qwen-VL Plus", "type": "dashscope", "model": "qwen-vl-plus",
+        "desc": "通义千问 - 中文图片理解最佳", "group": "china",
+        "key_env": "DASHSCOPE_API_KEY",
+        "logo": "/static/logos/qwen-new.png",
+        "signup_url": "https://dashscope.console.aliyun.com/apiKey",
+    },
+    "glm-vision": {
+        "name": "GLM-4V Flash", "type": "openai-compatible", "model": "glm-4v-flash",
+        "desc": "智谱 - 免费视觉模型", "group": "china",
+        "key_env": "GLM_API_KEY",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "logo": "/static/logos/zhipu-color.png",
+    },
+    # --- Local ---
+    "ollama-vision": {
+        "name": "Ollama (minicpm-v)", "type": "ollama", "model": "minicpm-v",
+        "desc": "Local - free offline vision", "group": "local",
+        "logo": "/static/logos/Ollama-logo.svg.png",
+    },
+    "none": {
+        "name": "Disabled", "type": "none",
+        "desc": "Skip image extraction", "group": "local",
+        "logo": "/static/logos/llm.png",
+    },
+}
+
+DEFAULT_VISION_MODEL = os.environ.get("KBASE_VISION_MODEL", "none")
+
 # Language profiles for search optimization
 LANGUAGE_PROFILES = {
     "zh": {

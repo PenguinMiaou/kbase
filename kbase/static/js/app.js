@@ -44,6 +44,9 @@ function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replac
 
   // Apply i18n
   applyI18n();
+  // Auto-focus chat input on load
+  const chatInput=document.getElementById('chat-input');
+  if(chatInput)chatInput.focus();
 
   // Dissolve loading screen → show app
   setTimeout(()=>{
@@ -120,6 +123,8 @@ function switchTab(name){
   if(name==='ingest')loadIngestDirs();
   if(name==='connectors')loadConnectorList();
   if(name==='settings')loadSettingsPanel();
+  // Auto-focus chat input when switching to chat
+  if(name==='chat'){const ci=document.getElementById('chat-input');if(ci)ci.focus();}
 }
 
 // === Search Mode ===
@@ -1119,6 +1124,13 @@ async function loadSettingsPanel(){
   document.getElementById('set-top-k').value=s.top_k||10;
   document.getElementById('set-rerank').checked=s.use_rerank!==false;
   document.getElementById('set-time-decay').checked=s.time_decay!==false;
+
+  // Current version display
+  try{
+    const ver=await api('/api/version');
+    const verEl=document.getElementById('current-version');
+    if(verEl)verEl.textContent=`v${ver.version} (${ver.install_type})`;
+  }catch(e){}
 
   // Update URL
   const updEl=document.getElementById('set-update-url');

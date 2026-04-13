@@ -349,7 +349,10 @@
 
         <!-- Update Section -->
         <div class="update-section">
-          <h3 data-i18n="update">Update</h3>
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <h3 data-i18n="update">Update</h3>
+            <span id="current-version" style="font-size:12px;color:var(--text-muted);"></span>
+          </div>
           <div class="update-url-row">
             <label>Update URL</label>
             <input id="set-update-url" type="text" placeholder="https://example.com/kbase/version.json">

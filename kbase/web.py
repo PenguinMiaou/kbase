@@ -1085,10 +1085,12 @@ print(path)
     @app.get("/api/settings")
     def api_get_settings():
         settings = load_settings(workspace)
+        from kbase.config import VISION_MODELS
         return {
             "settings": settings,
             "embedding_models": EMBEDDING_MODELS,
             "whisper_models": WHISPER_MODELS,
+            "vision_models": VISION_MODELS,
             "llm_providers": LLM_PROVIDERS,
             "buddy_presets": BUDDY_PRESETS,
             "language_profiles": LANGUAGE_PROFILES,

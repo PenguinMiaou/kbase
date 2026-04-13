@@ -94,6 +94,36 @@ def ingest_directory(
                 # Also segment Chinese for better FTS
                 chunk["text_segmented"] = segment_text(chunk["text"])
 
+            # Vision: extract and describe images from PPTX/PDF
+            ext = file_path.suffix.lower()
+            if ext in (".pptx", ".pdf"):
+                try:
+                    from kbase.vision import describe_document_images
+                    from kbase.config import load_settings
+                    vis_settings = load_settings()
+                    if vis_settings.get("vision_model", "none") != "none":
+                        image_descs = describe_document_images(fp, settings=vis_settings, max_images=10)
+                        for desc in image_descs:
+                            chunks.append({
+                                "text": enrich_chunk_context(
+                                    desc["text"], file_path.name,
+                                    {"slide": desc.get("slide"), "page": desc.get("page")},
+                                ),
+                                "text_segmented": segment_text(desc["text"]),
+                                "metadata": {
+                                    "file_path": fp,
+                                    "file_name": file_path.name,
+                                    "is_image_desc": True,
+                                    "slide": desc.get("slide"),
+                                    "page": desc.get("page"),
+                                },
+                            })
+                        if image_descs:
+                            stats.setdefault("images_described", 0)
+                            stats["images_described"] += len(image_descs)
+                except Exception as e:
+                    print(f"[KBase] Vision extraction failed for {file_path.name}: {e}")
+
             # Index
             store.index_document(
                 fp,
