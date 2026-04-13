@@ -1228,7 +1228,7 @@ function showProviderConfig(key,type){
         <span style="font-size:12px;color:var(--text-dim);">Local model — no API key needed</span>
         <span style="font-size:11px;">${isDownloaded
           ?'<span style="color:var(--green);font-weight:500;">Downloaded</span>'
-          :`<button id="${dlBtnId}" onclick="downloadModel('${esc(m.name)}','${dlBtnId}','${dlBarId}','${dlMsgId}')" style="padding:4px 12px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:11px;font-weight:500;">Download</button>`
+          :`<button id="${dlBtnId}" onclick="event.preventDefault();event.stopPropagation();downloadModel('${m.name.replace(/'/g,"\\'")}','${dlBtnId}','${dlBarId}','${dlMsgId}')" style="padding:4px 12px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:11px;font-weight:500;">Download</button>`
         }</span>
       </div>
       <div style="font-size:11px;color:var(--text-muted);">${size}</div>

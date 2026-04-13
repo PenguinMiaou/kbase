@@ -940,31 +940,42 @@ Question: {question}"""
 
         def do_download():
             try:
-                # In frozen/DMG mode, install sentence_transformers first if needed
-                if getattr(sys, 'frozen', False):
-                    try:
-                        import sentence_transformers
-                    except ImportError:
-                        q.put(json.dumps({"status": "installing", "message": "Installing sentence_transformers (one-time setup)...", "progress": 10}))
-                        import subprocess
-                        pip_target = str(Path.home() / ".kbase" / "python_packages")
-                        Path(pip_target).mkdir(parents=True, exist_ok=True)
-                        result = subprocess.run(
-                            [sys.executable, "-m", "pip", "install",
-                             "--target", pip_target, "sentence_transformers", "--quiet"],
-                            capture_output=True, text=True, timeout=600,
-                        )
-                        if result.returncode != 0:
-                            q.put(json.dumps({"status": "error", "message": f"pip install failed: {result.stderr[:200]}"}))
-                            return
-                        if pip_target not in sys.path:
-                            sys.path.insert(0, pip_target)
-                        q.put(json.dumps({"status": "installing", "message": "sentence_transformers installed!", "progress": 40}))
+                import subprocess
+                q.put(json.dumps({"status": "downloading", "message": f"Downloading {model_name}...", "progress": 10}))
 
-                q.put(json.dumps({"status": "downloading", "message": f"Downloading {model_name}...", "progress": 50}))
-                from sentence_transformers import SentenceTransformer
-                model = SentenceTransformer(model_name)
-                q.put(json.dumps({"status": "done", "message": "Model ready! Restart KBase for best results.", "progress": 100}))
+                # Use system python3 (not frozen binary) to download via huggingface_hub
+                # This works even in DMG mode because macOS ships with python3
+                sys_python = "/usr/bin/python3"
+                if not Path(sys_python).exists():
+                    import shutil
+                    sys_python = shutil.which("python3") or "python3"
+
+                # Step 1: Ensure huggingface_hub is installed
+                q.put(json.dumps({"status": "downloading", "message": "Setting up download tools...", "progress": 20}))
+                subprocess.run(
+                    [sys_python, "-m", "pip", "install", "--user", "huggingface_hub", "-q"],
+                    capture_output=True, text=True, timeout=120,
+                )
+
+                # Step 2: Download model using huggingface_hub snapshot_download
+                q.put(json.dumps({"status": "downloading", "message": f"Downloading {model_name} (this may take a few minutes)...", "progress": 40}))
+                dl_script = f"""
+import huggingface_hub
+path = huggingface_hub.snapshot_download('{model_name}')
+print(path)
+"""
+                result = subprocess.run(
+                    [sys_python, "-c", dl_script],
+                    capture_output=True, text=True, timeout=600,
+                )
+                if result.returncode != 0:
+                    q.put(json.dumps({"status": "error", "message": f"Download failed: {result.stderr[:300]}"}))
+                    return
+
+                model_path = result.stdout.strip()
+                q.put(json.dumps({"status": "done", "message": f"Model downloaded to {model_path}. Restart KBase to use it.", "progress": 100}))
+            except subprocess.TimeoutExpired:
+                q.put(json.dumps({"status": "error", "message": "Download timed out (10 min limit)"}))
             except Exception as e:
                 q.put(json.dumps({"status": "error", "message": str(e)[:300]}))
             finally:
