@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="kbase/static/logos/kbase-logo.svg" alt="KBase" width="80" height="80">
+
 # KBase
 
 **The local-first knowledge base that actually finds what you need.**
@@ -7,7 +9,14 @@
 Turn any folder of documents into a searchable, AI-powered knowledge base.
 No cloud upload. No vendor lock-in. Your data stays on your machine.
 
+[![Release](https://img.shields.io/github/v/release/PenguinMiaou/kbase?style=flat-square)](https://github.com/PenguinMiaou/kbase/releases)
+[![License](https://img.shields.io/github/license/PenguinMiaou/kbase?style=flat-square)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue?style=flat-square)]()
+
 [Quick Start](#quick-start) | [Features](#features) | [Knowledge Graph](#knowledge-graph) | [Architecture](#architecture) | [CLI](#cli) | [中文](README_zh.md)
+
+<!-- Screenshots: replace placeholder paths after user provides images -->
+<img src="docs/screenshots/chat-demo.png" alt="KBase Chat" width="800">
 
 </div>
 
@@ -52,6 +61,8 @@ Query -> Synonym Expand -> [HyDE -> Multi-Query]* -> Semantic + Keyword + Filena
 | **Graph Boost** | Manually confirmed document relationships boost search ranking |
 
 ### Knowledge Graph
+
+<img src="docs/screenshots/graph-dark.png" alt="Knowledge Graph" width="700">
 
 Obsidian-style graph visualization with **Graph + Canvas dual mode**:
 
@@ -124,6 +135,17 @@ Auto-routes by language: Chinese queries hit Bing CN + DuckDuckGo, English queri
 | `.rar` | RAR archive extraction (rarfile pure-Python) |
 
 ### Claude-Inspired UI
+
+<details>
+<summary>More screenshots</summary>
+
+| Dark Mode | Light Mode |
+|-----------|------------|
+| <img src="docs/screenshots/chat-dark.png" width="400"> | <img src="docs/screenshots/chat-light.png" width="400"> |
+| <img src="docs/screenshots/search-dark.png" width="400"> | <img src="docs/screenshots/ingest-light.png" width="400"> |
+| <img src="docs/screenshots/graph-dark.png" width="400"> | <img src="docs/screenshots/graph-light.png" width="400"> |
+
+</details>
 
 - 3-column layout with artifact panel for research reports
 - Session management with auto-generated titles
