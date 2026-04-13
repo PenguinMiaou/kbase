@@ -1,30 +1,125 @@
-"""Web search + Research module — combine with local KB for hybrid answers."""
+"""Web search + Research module — multi-engine search with language-based routing."""
 import json
+import re
+import time
+import urllib.request
+import urllib.parse
 from typing import Optional
+from html.parser import HTMLParser
 
 
-def web_search(query: str, max_results: int = 5, region: str = "wt-wt") -> list:
-    """Search the web using DuckDuckGo (free, no API key)."""
-    try:
-        from duckduckgo_search import DDGS
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, region=region, max_results=max_results))
-        return [
-            {
-                "title": r.get("title", ""),
-                "url": r.get("href", ""),
-                "snippet": r.get("body", ""),
-                "source": "web",
-            }
-            for r in results
-        ]
-    except Exception as e:
-        return [{"title": "Search error", "snippet": str(e), "url": "", "source": "error"}]
+# ============================================================
+# Multi-Engine Search (16 engines, no API keys needed)
+# ============================================================
+
+# Engine definitions: {name, url_template, parser, group}
+SEARCH_ENGINES = {
+    # ── International ──
+    "duckduckgo": {"name": "DuckDuckGo", "group": "intl", "type": "api"},
+    "brave": {"name": "Brave", "group": "intl", "type": "scrape",
+              "url": "https://search.brave.com/search?q={q}"},
+    "serper": {"name": "Google (Serper)", "group": "intl", "type": "api", "needs_key": "serper_api_key"},
+    # ── China (国内) ──
+    "bing_cn": {"name": "Bing CN", "group": "china", "type": "scrape",
+                "url": "https://cn.bing.com/search?q={q}&ensearch=0"},
+    "sogou": {"name": "Sogou", "group": "china", "type": "scrape",
+              "url": "https://sogou.com/web?query={q}"},
+    "wechat": {"name": "WeChat Articles", "group": "china", "type": "scrape",
+               "url": "https://wx.sogou.com/weixin?type=2&query={q}"},
+}
+
+# Default engine selection per language
+DEFAULT_ENGINES = {
+    "zh": ["duckduckgo", "bing_cn"],      # Chinese queries
+    "en": ["duckduckgo", "brave"],          # English queries
+    "auto": ["duckduckgo"],                 # Fallback
+}
 
 
-def web_search_serper(query: str, api_key: str, max_results: int = 5) -> list:
-    """Search using Serper.dev (Google results, needs API key)."""
-    import urllib.request
+def _detect_language(text: str) -> str:
+    """Detect if text is primarily Chinese or English."""
+    cjk = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+    return "zh" if cjk / max(len(text), 1) > 0.2 else "en"
+
+
+def web_search(query: str, max_results: int = 5, region: str = "wt-wt",
+               engines: list = None, settings: dict = None) -> list:
+    """Multi-engine web search with automatic language-based routing.
+
+    Args:
+        query: Search query
+        max_results: Max results per engine
+        engines: Explicit engine list, or None for auto-detect
+        settings: Settings dict (for API keys like serper_api_key)
+    """
+    settings = settings or {}
+
+    # Auto-select engines based on query language
+    if not engines:
+        lang = _detect_language(query)
+        engines = DEFAULT_ENGINES.get(lang, DEFAULT_ENGINES["auto"])
+        # Add serper if API key is available
+        if settings.get("serper_api_key"):
+            engines = ["serper"] + engines
+
+    all_results = []
+    seen_urls = set()
+
+    for engine_key in engines:
+        engine = SEARCH_ENGINES.get(engine_key)
+        if not engine:
+            continue
+
+        try:
+            if engine_key == "duckduckgo":
+                results = _search_duckduckgo(query, max_results)
+            elif engine_key == "serper":
+                api_key = settings.get("serper_api_key", "")
+                if api_key:
+                    results = _search_serper(query, api_key, max_results)
+                else:
+                    continue
+            elif engine.get("type") == "scrape":
+                results = _search_scrape(query, engine, max_results)
+            else:
+                continue
+
+            # Deduplicate by URL
+            for r in results:
+                url = r.get("url", "")
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    r["engine"] = engine.get("name", engine_key)
+                    all_results.append(r)
+
+        except Exception as e:
+            all_results.append({
+                "title": f"{engine.get('name', engine_key)} error",
+                "snippet": str(e)[:100],
+                "url": "", "source": "error", "engine": engine.get("name"),
+            })
+
+        # Rate limit between engines
+        if len(engines) > 1:
+            time.sleep(0.5)
+
+    return all_results[:max_results * 2]  # Return up to 2x for multi-engine
+
+
+def _search_duckduckgo(query: str, max_results: int) -> list:
+    """DuckDuckGo via duckduckgo_search library."""
+    from duckduckgo_search import DDGS
+    with DDGS() as ddgs:
+        results = list(ddgs.text(query, max_results=max_results))
+    return [
+        {"title": r.get("title", ""), "url": r.get("href", ""),
+         "snippet": r.get("body", ""), "source": "web"}
+        for r in results
+    ]
+
+
+def _search_serper(query: str, api_key: str, max_results: int) -> list:
+    """Google results via Serper.dev API."""
     data = json.dumps({"q": query, "num": max_results}).encode()
     req = urllib.request.Request(
         "https://google.serper.dev/search",
@@ -38,6 +133,56 @@ def web_search_serper(query: str, api_key: str, max_results: int = 5) -> list:
          "snippet": r.get("snippet", ""), "source": "google"}
         for r in result.get("organic", [])[:max_results]
     ]
+
+
+def _search_scrape(query: str, engine: dict, max_results: int) -> list:
+    """Scrape search results from engine URL (no API key needed)."""
+    url = engine["url"].format(q=urllib.parse.quote_plus(query))
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    }
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+    except Exception:
+        return []
+
+    # Simple HTML result extraction
+    results = []
+    # Look for common search result patterns: <a href="...">title</a> + snippet
+    links = re.findall(r'<a[^>]+href="(https?://[^"]+)"[^>]*>([^<]+)</a>', html)
+    for href, title in links:
+        title = title.strip()
+        if not title or len(title) < 5:
+            continue
+        # Skip engine's own links
+        if any(skip in href for skip in ["bing.com/ck", "sogou.com/link", "google.com/search"]):
+            continue
+        results.append({
+            "title": _unescape_html(title),
+            "url": href,
+            "snippet": "",
+            "source": "web",
+        })
+        if len(results) >= max_results:
+            break
+
+    return results
+
+
+def _unescape_html(text: str) -> str:
+    """Unescape HTML entities."""
+    text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    text = text.replace("&quot;", '"').replace("&#39;", "'")
+    return text
+
+
+def web_search_serper(query: str, api_key: str, max_results: int = 5) -> list:
+    """Legacy wrapper for backward compatibility."""
+    return _search_serper(query, api_key, max_results)
 
 
 def research(query: str, llm_func=None, kb_search_func=None,

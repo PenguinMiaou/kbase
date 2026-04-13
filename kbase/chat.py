@@ -372,7 +372,7 @@ def chat(store: KBaseStore, question: str, settings: dict = None,
                     web_sources.append({"name": wr["title"], "url": wr["url"], "source": "web"})
         else:
             # Single web search
-            web_results = web_search(search_query, max_results=5)
+            web_results = web_search(search_query, max_results=5, settings=settings)
             for wr in web_results:
                 context_parts.append(f"[Web: {wr['title']}]\n{wr['snippet']}")
                 web_sources.append({"name": wr["title"], "url": wr["url"], "source": "web"})
