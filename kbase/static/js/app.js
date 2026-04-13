@@ -979,15 +979,49 @@ async function doIngestNew(){
   if(!path)return;
   const force=document.getElementById('ingest-force').checked;
   const el=document.getElementById('ingest-result');
-  el.innerHTML='<p style="color:var(--yellow)">Ingesting...</p>';
-  const form=new FormData();form.append('directory',path);form.append('force',force);
-  const d=await api('/api/ingest',{method:'POST',body:form});
   el.innerHTML=`<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:8px;">
-    <p style="color:var(--green)">Done in ${d.elapsed_seconds||'?'}s</p>
-    <p style="font-size:12px;">Processed: ${d.processed||0} | Skipped: ${d.skipped||0} | Failed: ${d.failed||0}</p>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <span style="font-size:12px;color:var(--text-dim);" id="ingest-status">Scanning files...</span>
+      <span style="font-size:11px;color:var(--text-muted);" id="ingest-count"></span>
+    </div>
+    <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;">
+      <div id="ingest-bar" style="height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width 0.3s;"></div>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;" id="ingest-file"></div>
   </div>`;
-  loadStats();
-  loadIngestDirs();
+
+  const url=`/api/ingest-stream?directory=${encodeURIComponent(path)}&force=${force}`;
+  const evtSrc=new EventSource(url);
+  evtSrc.onmessage=function(e){
+    try{
+      const d=JSON.parse(e.data);
+      const bar=document.getElementById('ingest-bar');
+      const status=document.getElementById('ingest-status');
+      const count=document.getElementById('ingest-count');
+      const file=document.getElementById('ingest-file');
+      if(d.done){
+        evtSrc.close();
+        if(bar)bar.style.width='100%';
+        if(bar)bar.style.background='var(--green)';
+        if(status)status.innerHTML=`<span style="color:var(--green);font-weight:500;">Done in ${d.elapsed_seconds||'?'}s</span>`;
+        if(count)count.textContent=`${d.processed||0} processed, ${d.skipped||0} skipped, ${d.failed||0} failed${d.removed?', '+d.removed+' cleaned':''}`;
+        if(file)file.textContent='';
+        loadStats();loadIngestDirs();
+      }else{
+        const pct=d.total?Math.round(d.current/d.total*100):0;
+        if(bar)bar.style.width=pct+'%';
+        if(status)status.textContent=`${d.status==='skipped'?'Skipping':'Processing'} (${d.current}/${d.total})`;
+        if(count)count.textContent=pct+'%';
+        if(file)file.textContent=d.name||'';
+      }
+    }catch(err){}
+  };
+  evtSrc.onerror=function(){
+    evtSrc.close();
+    const status=document.getElementById('ingest-status');
+    if(status)status.innerHTML='<span style="color:var(--red);">Connection lost</span>';
+    loadStats();loadIngestDirs();
+  };
 }
 // Drag & drop support
 document.addEventListener('DOMContentLoaded',()=>{

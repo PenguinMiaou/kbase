@@ -142,6 +142,19 @@ def create_app(workspace: str = "default") -> FastAPI:
                 def cb(current, total, name, status):
                     q.put(json.dumps({"current": current, "total": total, "name": name, "status": status}))
                 stats = ingest_directory(store, directory, force=force, progress_callback=cb)
+                # Track directory in settings
+                settings_data = load_settings(workspace)
+                dirs = settings_data.setdefault("ingest_dirs", {})
+                if isinstance(dirs, list):
+                    dirs = {d: {"enabled": True} for d in dirs if isinstance(d, str)}
+                    settings_data["ingest_dirs"] = dirs
+                dirs[directory] = {
+                    "enabled": True,
+                    "last_sync": time.time(),
+                    "file_count": stats.get("total", 0),
+                    "status": "ok" if stats.get("failed", 0) == 0 else "partial",
+                }
+                save_settings(workspace, settings_data)
                 q.put(json.dumps({"done": True, **stats}))
             except Exception as e:
                 q.put(json.dumps({"done": True, "error": str(e)}))
