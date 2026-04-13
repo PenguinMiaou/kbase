@@ -117,6 +117,17 @@ DuckDuckGo / Brave / Google (Serper) / Bing 国际版 / 搜狗 / 微信文章，
 
 ### Claude 风格 UI
 
+| | |
+|---|---|
+| **搜索 + 文件预览** | **图谱悬浮 + 预览** |
+| <img src="docs/screenshots/search-preview.png" width="400"> | <img src="docs/screenshots/graph-hover.png" width="400"> |
+| **搜索类型过滤** | **局部图聚焦** |
+| <img src="docs/screenshots/search-filter.png" width="400"> | <img src="docs/screenshots/graph-local.png" width="400"> |
+| **导入进度** | **文件管理** |
+| <img src="docs/screenshots/ingest.png" width="400"> | <img src="docs/screenshots/file-list.png" width="400"> |
+| **设置 - 助手** | **设置 - LLM** |
+| <img src="docs/screenshots/settings1.png" width="400"> | <img src="docs/screenshots/settings2.png" width="400"> |
+
 - 三栏布局 + 研究报告 artifact 面板
 - 会话管理（自动生成标题）
 - 7 个助手预设（MBTI 人格 + 自定义）
