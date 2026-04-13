@@ -7,7 +7,7 @@
 Turn any folder of documents into a searchable, AI-powered knowledge base.
 No cloud upload. No vendor lock-in. Your data stays on your machine.
 
-[Quick Start](#quick-start) | [Features](#features) | [Knowledge Graph](#knowledge-graph) | [Architecture](#architecture) | [CLI](#cli)
+[Quick Start](#quick-start) | [Features](#features) | [Knowledge Graph](#knowledge-graph) | [Architecture](#architecture) | [CLI](#cli) | [中文](README_zh.md)
 
 </div>
 
