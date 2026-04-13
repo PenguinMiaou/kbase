@@ -253,7 +253,8 @@ BUDDY_PRESETS = {
     },
 }
 
-SYSTEM_PROMPT = """You are a knowledgeable assistant with access to the user's local knowledge base.
+SYSTEM_PROMPTS = {
+    "kb": """You are a knowledgeable assistant with access to the user's local knowledge base.
 Answer based on the retrieved context below.
 
 {buddy_extra}
@@ -267,7 +268,50 @@ Rules:
 
 Retrieved Context:
 {context}
-"""
+""",
+    "web": """You are a knowledgeable assistant with access to web search results.
+Answer based on the web search results below.
+
+{buddy_extra}
+
+Rules:
+- Answer in the same language as the user's question.
+- Cite sources using [Source Title](URL) format when available.
+- If the search results are insufficient, say so honestly and provide what you know.
+- Be concise and direct. Include specific numbers when available.
+
+Web Search Results:
+{context}
+""",
+    "hybrid": """You are a knowledgeable assistant with access to the user's local knowledge base and web search.
+Answer based on the retrieved context below, combining local and web sources.
+
+{buddy_extra}
+
+Rules:
+- Answer in the same language as the user's question.
+- Cite local sources using [filename] format and web sources using [Source Title](URL) format.
+- Prioritize local KB sources; supplement with web results.
+- If context is insufficient, say so honestly.
+- Be concise and direct. Include specific numbers when available.
+
+Retrieved Context:
+{context}
+""",
+    "direct": """You are a knowledgeable assistant.
+
+{buddy_extra}
+
+Rules:
+- Answer in the same language as the user's question.
+- Be concise and direct.
+- If you're not sure about something, say so honestly.
+
+{context}
+""",
+}
+# Backward compat alias
+SYSTEM_PROMPT = SYSTEM_PROMPTS["kb"]
 
 # Persistent conversation store
 _conversations: dict[str, list] = {}
@@ -338,6 +382,89 @@ def _save_memories():
         _memories_file.write_text(json.dumps(_global_memories, ensure_ascii=False, indent=1))
 
 
+def _detect_intent(question: str) -> str:
+    """Detect query intent and route to appropriate search mode (no LLM needed).
+
+    Returns: "direct" | "kb" | "web" | "hybrid" | "research"
+    """
+    q = question.strip().lower()
+
+    # Direct chat signals (no search needed)
+    direct_signals = [
+        "你好", "hello", "hi ", "hey", "谢谢", "thanks", "再见", "bye",
+        "你是谁", "who are you", "帮我", "help me",
+    ]
+    if any(q.startswith(s) or q == s for s in direct_signals):
+        return "direct"
+    if len(q) < 5 and not any('\u4e00' <= c <= '\u9fff' for c in q):
+        return "direct"
+
+    # Web search signals
+    web_signals = [
+        "最新", "latest", "news", "新闻", "今天", "today", "2026", "2025",
+        "价格", "price", "天气", "weather", "股价", "stock",
+        "怎么样", "what is", "who is", "where is",
+    ]
+    # If query asks about external/real-time info not in local docs
+    web_score = sum(1 for s in web_signals if s in q)
+
+    # KB search signals
+    kb_signals = [
+        "文件", "file", "文档", "document", "报告", "report", "方案", "plan",
+        "会议", "meeting", "邮件", "email", "ppt", "excel", "pdf",
+        "我们的", "our", "公司", "company", "部门", "department",
+        "上次", "之前", "去年", "上季度",
+    ]
+    kb_score = sum(1 for s in kb_signals if s in q)
+
+    # Research signals (require strong intent indicators)
+    research_signals = [
+        "研究", "research", "综合分析", "comprehensive", "深入研究",
+        "详细分析", "深度调研", "全面分析", "写一份报告", "deep dive",
+    ]
+    research_score = sum(1 for s in research_signals if s in q)
+
+    if research_score >= 1:
+        return "research"
+    if kb_score > web_score:
+        return "kb"
+    if web_score > kb_score:
+        return "web"
+    if web_score > 0 and kb_score > 0:
+        return "hybrid"
+
+    # Default: KB search (most common use case for a local knowledge base)
+    return "kb"
+
+
+def _compute_context_budget(question: str, results: list) -> int:
+    """Dynamically compute how many context chunks to include.
+
+    Simple questions get fewer chunks (less noise), complex questions get more.
+    Prevents the "Lost in the Middle" effect (RAGFlow insight).
+    """
+    q = question.strip().lower()
+
+    # Short questions = simple, limit context (but check for CJK chars which are shorter)
+    cjk_count = sum(1 for c in q if '\u4e00' <= c <= '\u9fff')
+    effective_len = len(q) if cjk_count == 0 else cjk_count * 2 + (len(q) - cjk_count)
+    if effective_len < 15:
+        return 3
+
+    # Complex signals = need more context
+    complex_signals = ["对比", "compare", "所有", "all", "列出", "list",
+                       "区别", "difference", "分别", "各个", "分析", "analyze"]
+    complexity = sum(1 for s in complex_signals if s in q)
+
+    if complexity >= 2:
+        return 10
+    if complexity >= 1:
+        return 6
+
+    # Medium complexity
+    return 5
+
+
 def chat(store: KBaseStore, question: str, settings: dict = None,
          top_k: int = 10, conversation_id: str = "default",
          history: list = None) -> dict:
@@ -358,8 +485,10 @@ def chat(store: KBaseStore, question: str, settings: dict = None,
             _conversations[conversation_id] = []
         conv_history = _conversations[conversation_id]
 
-    # 0. Research mode: check if question is clear enough
+    # 0. Intent detection + auto mode routing
     search_mode = settings.get("search_mode", "kb")
+    if search_mode == "auto":
+        search_mode = _detect_intent(question)
     skip_words = {"开始", "go", "start", "直接搜", "搜吧", "研究吧", "好的", "ok"}
     is_followup = question.strip().lower() in skip_words or len(conv_history) >= 2
     if search_mode == "research" and not is_followup:
@@ -440,6 +569,9 @@ def chat(store: KBaseStore, question: str, settings: dict = None,
                 context_parts.append(f"[Web: {wr['title']}]\n{wr['snippet']}")
                 web_sources.append({"name": wr["title"], "url": wr["url"], "source": "web"})
 
+    # Apply context budget: limit chunks to prevent "Lost in the Middle" effect
+    budget = _compute_context_budget(question, context_parts)
+    context_parts = context_parts[:budget]
     context = "\n\n---\n\n".join(context_parts) if context_parts else "No relevant context found."
 
     # 3. Build buddy personality
@@ -454,7 +586,8 @@ def chat(store: KBaseStore, question: str, settings: dict = None,
     if _global_memories:
         mem_lines = [m["content"] for m in _global_memories[-20:]]
         memory_context = "\n\nUser Memory (facts learned from previous conversations):\n" + "\n".join(f"- {l}" for l in mem_lines)
-    system = SYSTEM_PROMPT.format(context=context, buddy_extra=buddy_extra) + memory_context
+    prompt_template = SYSTEM_PROMPTS.get(search_mode, SYSTEM_PROMPTS["kb"])
+    system = prompt_template.format(context=context, buddy_extra=buddy_extra) + memory_context
 
     # 5. Build messages with conversation history
     messages = []
@@ -534,9 +667,14 @@ def generate_title(conversation_id: str, settings: dict = None) -> str:
     provider_key = settings.get("llm_provider", "claude-sonnet")
     provider = LLM_PROVIDERS.get(provider_key, LLM_PROVIDERS.get("claude-sonnet"))
     try:
-        prompt = f"根据以下对话内容，生成一个简短的标题（不超过20个字，不要引号，不要标点）：\n\n用户：{first_q}\n\n助手：{first_a[:200] if first_a else '(无回复)'}"
+        prompt = (
+            f"Generate a short title (max 20 chars) for this conversation. "
+            f"Use the SAME LANGUAGE as the user's message. No quotes, no punctuation.\n\n"
+            f"User: {first_q}\n\n"
+            f"Assistant: {first_a[:200] if first_a else '(no reply)'}"
+        )
         title = _call_llm(provider, [{"role": "user", "content": prompt}],
-                          "你是标题生成器，只输出标题本身，不要任何额外文字。", settings)
+                          "You are a title generator. Output ONLY the title itself, nothing else. Match the language of the user's message.", settings)
         title = title.strip().strip('"\'""''').strip()[:30]
     except Exception:
         # Fallback: use first question truncated
@@ -830,3 +968,117 @@ def _call_cli(provider, messages, system, settings):
         raise ValueError(f"CLI timed out after 120s")
     except FileNotFoundError:
         raise ValueError(f"'{executable}' not found")
+
+
+# ---- Knowledge Compilation (Karpathy LLM Wiki-inspired) ----
+
+def generate_document_summary(text: str, file_name: str, settings: dict = None) -> str:
+    """Generate a structured summary for a document during ingest.
+
+    Inspired by Karpathy's LLM Wiki: instead of just chunking and embedding,
+    we "compile" each document into a structured summary with:
+    - One-line description
+    - Key topics/tags
+    - Core concepts and findings
+    - Potential relationships to other topics
+    """
+    settings = settings or {}
+    provider_key = settings.get("llm_provider", "")
+    provider = LLM_PROVIDERS.get(provider_key)
+    if not provider:
+        return ""
+
+    # Take first ~3000 chars for summary (enough for understanding, saves tokens)
+    excerpt = text[:3000].strip()
+    if not excerpt:
+        return ""
+
+    prompt = (
+        f"File: {file_name}\n\n"
+        f"Content excerpt:\n{excerpt}\n\n"
+        f"Generate a structured summary in the SAME LANGUAGE as the document content:\n"
+        f"1. **Description**: One sentence describing what this document is about\n"
+        f"2. **Topics**: 3-5 topic tags (comma separated)\n"
+        f"3. **Key Points**: 3-5 bullet points of the most important content\n"
+        f"4. **Entities**: Key names, organizations, dates, project names mentioned (comma separated)\n"
+        f"5. **Questions**: 2-3 questions that someone might ask that would lead to this document\n"
+        f"6. **Related Topics**: 2-3 topics this document likely connects to\n\n"
+        f"Keep it concise (under 250 words). Use the document's language."
+    )
+
+    try:
+        return _call_llm(
+            provider,
+            [{"role": "user", "content": prompt}],
+            "You are a knowledge librarian. Generate concise, accurate document summaries.",
+            settings,
+        )
+    except Exception as e:
+        print(f"[KBase] Summary generation failed for {file_name}: {e}")
+        return ""
+
+
+def generate_edge_descriptions(file_pairs: list[dict], settings: dict = None) -> list[str]:
+    """Generate semantic descriptions for document relationships.
+
+    Instead of just a similarity score, describe WHY two documents are related.
+    Batch multiple pairs in one LLM call to save tokens.
+
+    Args:
+        file_pairs: list of {"source_name": str, "source_summary": str,
+                             "target_name": str, "target_summary": str}
+    Returns:
+        list of description strings, one per pair
+    """
+    settings = settings or {}
+    provider_key = settings.get("llm_provider", "")
+    provider = LLM_PROVIDERS.get(provider_key)
+    if not provider or not file_pairs:
+        return [""] * len(file_pairs)
+
+    pairs_text = ""
+    for i, pair in enumerate(file_pairs):
+        pairs_text += (
+            f"Pair {i+1}:\n"
+            f"  A: {pair['source_name']}"
+        )
+        if pair.get("source_summary"):
+            pairs_text += f" — {pair['source_summary'][:150]}"
+        pairs_text += (
+            f"\n  B: {pair['target_name']}"
+        )
+        if pair.get("target_summary"):
+            pairs_text += f" — {pair['target_summary'][:150]}"
+        pairs_text += "\n\n"
+
+    prompt = (
+        f"For each document pair below, write a SHORT relationship label (5-10 words) "
+        f"describing how they are connected. Use the documents' language.\n\n"
+        f"{pairs_text}"
+        f"Return ONLY the labels, one per line, numbered. Example:\n"
+        f"1. Same project technical specs\n"
+        f"2. Budget report for Q3 initiative\n"
+    )
+
+    try:
+        result = _call_llm(
+            provider,
+            [{"role": "user", "content": prompt}],
+            "You are a knowledge graph expert. Generate precise, short relationship labels.",
+            settings,
+        )
+        # Parse numbered lines
+        lines = [l.strip() for l in result.strip().split("\n") if l.strip()]
+        labels = []
+        for line in lines:
+            # Remove numbering like "1. " or "1: "
+            import re
+            cleaned = re.sub(r"^\d+[\.\):]\s*", "", line)
+            labels.append(cleaned)
+        # Pad if needed
+        while len(labels) < len(file_pairs):
+            labels.append("")
+        return labels[:len(file_pairs)]
+    except Exception as e:
+        print(f"[KBase] Edge description generation failed: {e}")
+        return [""] * len(file_pairs)

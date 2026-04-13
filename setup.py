@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="kbase",
-    version="0.5.1",
+    version="0.6.0",
     author="PenguinMiaou",
     license="MIT",
     packages=find_packages(),
@@ -19,6 +19,7 @@ setup(
         "fastapi>=0.100.0",
         "uvicorn>=0.23.0",
         "python-multipart>=0.0.6",
+        "setproctitle>=1.3.0",
     ],
     entry_points={
         "console_scripts": [

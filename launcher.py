@@ -7,6 +7,13 @@ import time
 import webbrowser
 import signal
 
+# Set process name to "kbase" instead of "python3"
+try:
+    import setproctitle
+    setproctitle.setproctitle("kbase")
+except ImportError:
+    pass
+
 IS_WINDOWS = platform.system() == "Windows"
 IS_MACOS = platform.system() == "Darwin"
 

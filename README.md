@@ -37,9 +37,9 @@ KBase indexes everything once, then lets you **search across all files in one pl
 
 ## Features
 
-### 13-Stage Adaptive Search Pipeline
+### 15-Stage Adaptive Search Pipeline
 
-KBase doesn't just do keyword matching. It runs a **13-stage retrieval pipeline** that adapts based on query difficulty:
+KBase doesn't just do keyword matching. It runs a **15-stage retrieval pipeline** that adapts based on query difficulty:
 
 ```
 Query -> Synonym Expand -> [HyDE -> Multi-Query]* -> Semantic + Keyword + Filename
@@ -161,11 +161,11 @@ Auto-routes by language: Chinese queries hit Bing CN + DuckDuckGo, English queri
 
 ### macOS (DMG)
 
-Download `KBase-0.5.1.dmg` from [Releases](https://github.com/PenguinMiaou/kbase/releases) -> Drag to Applications -> Open.
+Download `KBase-0.6.0.dmg` from [Releases](https://github.com/PenguinMiaou/kbase/releases) -> Drag to Applications -> Open.
 
 ### Windows (EXE)
 
-Download `KBase-0.5.1-Windows.zip` from [Releases](https://github.com/PenguinMiaou/kbase/releases) -> Extract -> Run `KBase.exe`.
+Download `KBase-0.6.0-Windows.zip` from [Releases](https://github.com/PenguinMiaou/kbase/releases) -> Extract -> Run `KBase.exe`.
 
 ### From Source
 

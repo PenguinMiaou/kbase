@@ -123,7 +123,62 @@ def compute_graph(store, threshold: float = 0.65, max_edges_per_node: int = 8):
                     new_edges.append((eid, group_ids[i], group_ids[j], "auto", "", "none", 0.3, "path", now, now))
                     existing_eids.add(eid)
 
-    # Step 5: Write to database (replace auto edges, keep manual ones)
+    # Step 5: LLM-powered edge descriptions for top semantic edges
+    settings = load_settings()
+    labeled_count = 0
+    if settings.get("llm_provider") and settings.get("auto_edge_labels", False):
+        try:
+            from kbase.chat import generate_edge_descriptions
+            # Only label top N semantic edges (sorted by score desc) to save tokens
+            semantic_edges = [(i, e) for i, e in enumerate(new_edges) if e[7] == "semantic"]
+            semantic_edges.sort(key=lambda x: x[1][6], reverse=True)
+            top_edges = semantic_edges[:30]  # Label top 30 edges
+
+            if top_edges:
+                pairs = []
+                for _, edge in top_edges:
+                    src_info = file_map.get(edge[1], {})
+                    tgt_info = file_map.get(edge[2], {})
+                    src_summary = ""
+                    tgt_summary = ""
+                    try:
+                        c.execute("SELECT summary FROM files WHERE file_id = ?", (edge[1],))
+                        row = c.fetchone()
+                        if row and row["summary"]:
+                            src_summary = row["summary"]
+                        c.execute("SELECT summary FROM files WHERE file_id = ?", (edge[2],))
+                        row = c.fetchone()
+                        if row and row["summary"]:
+                            tgt_summary = row["summary"]
+                    except Exception:
+                        pass
+                    pairs.append({
+                        "source_name": src_info.get("file_name", ""),
+                        "source_summary": src_summary,
+                        "target_name": tgt_info.get("file_name", ""),
+                        "target_summary": tgt_summary,
+                    })
+
+                # Batch call LLM (process in groups of 10 to avoid token limits)
+                all_labels = []
+                for batch_start in range(0, len(pairs), 10):
+                    batch = pairs[batch_start:batch_start + 10]
+                    labels = generate_edge_descriptions(batch, settings)
+                    all_labels.extend(labels)
+
+                # Update edge tuples with labels
+                new_edges_list = list(new_edges)
+                for k, (orig_idx, _) in enumerate(top_edges):
+                    if k < len(all_labels) and all_labels[k]:
+                        edge = list(new_edges_list[orig_idx])
+                        edge[4] = all_labels[k]  # label field
+                        new_edges_list[orig_idx] = tuple(edge)
+                        labeled_count += 1
+                new_edges = new_edges_list
+        except Exception as e:
+            print(f"[KBase] Edge labeling failed: {e}")
+
+    # Step 6: Write to database (replace auto edges, keep manual ones)
     c.execute("DELETE FROM document_edges WHERE edge_type = 'auto'")
     if new_edges:
         c.executemany("""
@@ -139,6 +194,7 @@ def compute_graph(store, threshold: float = 0.65, max_edges_per_node: int = 8):
         "edges_computed": len(new_edges),
         "edges_semantic": sum(1 for e in new_edges if e[7] == "semantic"),
         "edges_path": sum(1 for e in new_edges if e[7] == "path"),
+        "edges_labeled": labeled_count,
         "threshold": threshold,
     }
 
@@ -153,7 +209,7 @@ def get_graph_data(store, edge_types=None, min_score=0.0, file_type=None, source
     c = conn.cursor()
 
     # Get nodes (files)
-    query = "SELECT file_id, file_path, file_name, file_type, source_dir, chunk_count FROM files WHERE error IS NULL OR error = ''"
+    query = "SELECT file_id, file_path, file_name, file_type, source_dir, chunk_count, summary FROM files WHERE error IS NULL OR error = ''"
     params = []
     if file_type:
         query += " AND file_type = ?"
@@ -203,6 +259,7 @@ def get_graph_data(store, edge_types=None, min_score=0.0, file_type=None, source
                 "source_dir": f["source_dir"] or "",
                 "chunk_count": f["chunk_count"] or 0,
                 "degree": degree.get(fid, 0),
+                "summary": (f.get("summary") or "")[:200],
             },
             "position": {"x": pos.get("x", 0), "y": pos.get("y", 0)} if pos else None,
             "locked": bool(pos.get("pinned", 0)) if pos else False,

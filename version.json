@@ -1,7 +1,7 @@
 {
-  "version": "0.5.1",
+  "version": "0.6.0",
   "download_url": "https://github.com/PenguinMiaou/kbase/releases/latest",
-  "download_url_mac": "https://github.com/PenguinMiaou/kbase/releases/download/v0.5.1/KBase-0.5.1.dmg",
-  "download_url_win": "https://github.com/PenguinMiaou/kbase/releases/download/v0.5.1/KBase-0.5.1-Windows.zip",
-  "changelog": "v0.5.0: Knowledge Graph (Obsidian-style) with Graph/Canvas dual mode, editable edges, semantic similarity computation, search boost"
+  "download_url_mac": "https://github.com/PenguinMiaou/kbase/releases/download/v0.6.0/KBase-0.6.0.dmg",
+  "download_url_win": "https://github.com/PenguinMiaou/kbase/releases/download/v0.6.0/KBase-0.6.0-Windows.zip",
+  "changelog": "v0.6.0: Knowledge Compilation (Karpathy LLM Wiki), Harness Engineering (intent detection, context budget, click tracking), 15-stage adaptive search, multi-engine web search fix, i18n overhaul"
 }

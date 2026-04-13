@@ -164,9 +164,18 @@ class KBaseStore:
                 chunk_count INTEGER DEFAULT 0,
                 title TEXT,
                 source_dir TEXT,
-                error TEXT
+                error TEXT,
+                summary TEXT DEFAULT ''
             )
         """)
+        # Migration: add summary column if missing (existing DBs)
+        try:
+            c.execute("SELECT summary FROM files LIMIT 1")
+        except Exception:
+            try:
+                c.execute("ALTER TABLE files ADD COLUMN summary TEXT DEFAULT ''")
+            except Exception:
+                pass
         # FTS5 for full-text keyword search
         c.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS fts_chunks USING fts5(
@@ -224,6 +233,33 @@ class KBaseStore:
                 FOREIGN KEY (file_id) REFERENCES files(file_id)
             )
         """)
+
+        # User interest tracking (lightweight, no LLM needed)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS user_interests (
+                term TEXT PRIMARY KEY,
+                frequency INTEGER DEFAULT 1,
+                last_queried REAL,
+                first_queried REAL
+            )
+        """)
+
+        # Search feedback / click tracking (harness sensor)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS search_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                query TEXT NOT NULL,
+                file_id TEXT,
+                file_name TEXT,
+                position INTEGER DEFAULT 0,
+                action TEXT DEFAULT 'click',
+                timestamp REAL,
+                FOREIGN KEY (file_id) REFERENCES files(file_id)
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_feedback_file ON search_feedback(file_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_feedback_query ON search_feedback(query)")
+
         self.conn.commit()
 
     def file_id(self, file_path: str) -> str:
@@ -248,7 +284,7 @@ class KBaseStore:
             return False
 
     def index_document(self, file_path: str, text: str, chunks: list[dict],
-                       tables: list[dict], metadata: dict):
+                       tables: list[dict], metadata: dict, summary: str = ""):
         """Index a document: vector + FTS + tabular."""
         fid = self.file_id(file_path)
         p = Path(file_path)
@@ -261,8 +297,8 @@ class KBaseStore:
         c.execute("""
             INSERT OR REPLACE INTO files
             (file_id, file_path, file_name, file_type, file_size, modified_time,
-             indexed_time, chunk_count, title, source_dir, error)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             indexed_time, chunk_count, title, source_dir, error, summary)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             fid, str(p), p.name, p.suffix.lower(),
             metadata.get("file_size", 0),
@@ -272,6 +308,7 @@ class KBaseStore:
             metadata.get("title", p.stem),
             str(p.parent),
             metadata.get("error", ""),
+            summary,
         ))
 
         # Index chunks in ChromaDB + FTS
@@ -412,6 +449,108 @@ class KBaseStore:
         """Remove a file from the index."""
         fid = self.file_id(file_path)
         self._remove_document(fid)
+
+    def get_file_summary(self, file_id: str) -> str:
+        """Get the LLM-generated summary for a file."""
+        c = self.conn.cursor()
+        c.execute("SELECT summary FROM files WHERE file_id = ?", (file_id,))
+        row = c.fetchone()
+        return row["summary"] if row and row["summary"] else ""
+
+    def update_file_summary(self, file_id: str, summary: str):
+        """Update the LLM-generated summary for a file."""
+        c = self.conn.cursor()
+        c.execute("UPDATE files SET summary = ? WHERE file_id = ?", (summary, file_id))
+        self.conn.commit()
+
+    def get_files_without_summary(self, limit: int = 50) -> list[dict]:
+        """Get files that don't have a summary yet."""
+        c = self.conn.cursor()
+        c.execute("""
+            SELECT file_id, file_path, file_name, file_type
+            FROM files
+            WHERE (summary IS NULL OR summary = '') AND (error IS NULL OR error = '')
+            LIMIT ?
+        """, (limit,))
+        return [dict(row) for row in c.fetchall()]
+
+    # ---- User Interest Tracking (lightweight memory, no LLM) ----
+
+    def record_query_interests(self, query: str):
+        """Extract and record key terms from user query (no LLM needed)."""
+        import jieba
+        now = time.time()
+        # Segment query and filter short/stop words
+        stop_words = {"的", "了", "是", "在", "和", "有", "与", "对", "到", "为",
+                      "把", "被", "让", "给", "从", "能", "会", "要", "可以", "什么",
+                      "哪些", "怎么", "如何", "多少", "哪个", "这个", "那个", "一个",
+                      "the", "a", "an", "is", "are", "was", "were", "in", "on", "at",
+                      "to", "for", "of", "with", "and", "or", "not", "what", "how",
+                      "which", "where", "when", "who", "why", "do", "does", "did"}
+        terms = [w.strip() for w in jieba.cut(query) if len(w.strip()) >= 2 and w.strip().lower() not in stop_words]
+        if not terms:
+            return
+        c = self.conn.cursor()
+        for term in terms[:10]:  # Cap at 10 terms per query
+            c.execute("""
+                INSERT INTO user_interests (term, frequency, last_queried, first_queried)
+                VALUES (?, 1, ?, ?)
+                ON CONFLICT(term) DO UPDATE SET
+                    frequency = frequency + 1,
+                    last_queried = ?
+            """, (term, now, now, now))
+        self.conn.commit()
+
+    def get_top_interests(self, limit: int = 20) -> list[dict]:
+        """Get user's most frequent query terms."""
+        c = self.conn.cursor()
+        c.execute("""
+            SELECT term, frequency, last_queried
+            FROM user_interests
+            ORDER BY frequency DESC, last_queried DESC
+            LIMIT ?
+        """, (limit,))
+        return [dict(row) for row in c.fetchall()]
+
+    # ---- Search Feedback (harness sensor) ----
+
+    def record_click(self, query: str, file_id: str, file_name: str, position: int):
+        """Record when user clicks a search result."""
+        c = self.conn.cursor()
+        c.execute("""
+            INSERT INTO search_feedback (query, file_id, file_name, position, action, timestamp)
+            VALUES (?, ?, ?, ?, 'click', ?)
+        """, (query, file_id, file_name, position, time.time()))
+        self.conn.commit()
+
+    def record_feedback(self, query: str, file_id: str, action: str):
+        """Record thumbs up/down on an answer."""
+        c = self.conn.cursor()
+        c.execute("""
+            INSERT INTO search_feedback (query, file_id, action, timestamp)
+            VALUES (?, ?, ?, ?)
+        """, (query, file_id, action, time.time()))
+        self.conn.commit()
+
+    def get_click_scores(self, file_ids: list[str]) -> dict[str, float]:
+        """Get click frequency scores for a set of files (for search boost)."""
+        if not file_ids:
+            return {}
+        c = self.conn.cursor()
+        placeholders = ",".join("?" for _ in file_ids)
+        c.execute(f"""
+            SELECT file_id, COUNT(*) as clicks
+            FROM search_feedback
+            WHERE file_id IN ({placeholders}) AND action = 'click'
+            GROUP BY file_id
+        """, file_ids)
+        max_clicks = 1
+        scores = {}
+        for row in c.fetchall():
+            scores[row["file_id"]] = row["clicks"]
+            max_clicks = max(max_clicks, row["clicks"])
+        # Normalize to 0-1
+        return {fid: count / max_clicks for fid, count in scores.items()}
 
     # ---- Search methods ----
 

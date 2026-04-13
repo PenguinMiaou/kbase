@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 APP_NAME="KBase"
-VERSION="0.5.1"
+VERSION="0.6.0"
 DMG_NAME="${APP_NAME}-${VERSION}"
 
 echo ""

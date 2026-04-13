@@ -141,6 +141,7 @@ def ingest_directory(
                 chunk["text_segmented"] = segment_text(chunk["text"])
 
             # Vision: extract and describe images from PPTX/PDF
+            # RAGFlow pattern: merge image descriptions into the same page/slide chunk
             ext = file_path.suffix.lower()
             if ext in (".pptx", ".pdf"):
                 try:
@@ -150,25 +151,56 @@ def ingest_directory(
                     if vis_settings.get("vision_model", "none") != "none":
                         image_descs = describe_document_images(fp, settings=vis_settings, max_images=10)
                         for desc in image_descs:
-                            chunks.append({
-                                "text": enrich_chunk_context(
-                                    desc["text"], file_path.name,
-                                    {"slide": desc.get("slide"), "page": desc.get("page")},
-                                ),
-                                "text_segmented": segment_text(desc["text"]),
-                                "metadata": {
-                                    "file_path": fp,
-                                    "file_name": file_path.name,
-                                    "is_image_desc": True,
-                                    "slide": desc.get("slide"),
-                                    "page": desc.get("page"),
-                                },
-                            })
+                            desc_text = f"\n[Image: {desc['text']}]"
+                            slide_or_page = desc.get("slide") or desc.get("page")
+                            merged = False
+                            # Try to merge into existing chunk with same slide/page
+                            if slide_or_page:
+                                for chunk in chunks:
+                                    cm = chunk.get("metadata", {})
+                                    chunk_ref = cm.get("slide") or cm.get("page")
+                                    if chunk_ref and str(chunk_ref) == str(slide_or_page):
+                                        chunk["text"] += desc_text
+                                        chunk["text_segmented"] = segment_text(chunk["text"])
+                                        merged = True
+                                        break
+                            # If no matching chunk found, add as separate chunk
+                            if not merged:
+                                chunks.append({
+                                    "text": enrich_chunk_context(
+                                        desc["text"], file_path.name,
+                                        {"slide": desc.get("slide"), "page": desc.get("page")},
+                                    ),
+                                    "text_segmented": segment_text(desc["text"]),
+                                    "metadata": {
+                                        "file_path": fp,
+                                        "file_name": file_path.name,
+                                        "is_image_desc": True,
+                                        "slide": desc.get("slide"),
+                                        "page": desc.get("page"),
+                                    },
+                                })
                         if image_descs:
                             stats.setdefault("images_described", 0)
                             stats["images_described"] += len(image_descs)
                 except Exception as e:
                     print(f"[KBase] Vision extraction failed for {file_path.name}: {e}")
+
+            # Compile: generate LLM summary (Karpathy LLM Wiki-inspired)
+            summary = ""
+            try:
+                from kbase.config import load_settings as _load_settings
+                _settings = _load_settings()
+                if _settings.get("llm_provider") and _settings.get("auto_summary", False):
+                    from kbase.chat import generate_document_summary
+                    summary = generate_document_summary(
+                        result["text"], file_path.name, _settings
+                    )
+                    if summary:
+                        stats.setdefault("summaries_generated", 0)
+                        stats["summaries_generated"] += 1
+            except Exception as e:
+                print(f"[KBase] Summary skipped for {file_path.name}: {e}")
 
             # Index
             store.index_document(
@@ -177,6 +209,7 @@ def ingest_directory(
                 chunks,
                 result.get("tables", []),
                 result["metadata"],
+                summary=summary,
             )
 
             stats["processed"] += 1

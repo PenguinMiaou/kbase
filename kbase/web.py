@@ -28,6 +28,58 @@ from kbase.config import (
 )
 
 
+def _auto_save_research(report: str, question: str, workspace: str, settings: dict):
+    """Auto-save research report to file and index it into the knowledge base.
+
+    Creates a Markdown file in ~/.kbase/{workspace}/research_reports/
+    and ingests it so future searches can find previous research outputs.
+    """
+    from kbase.config import get_workspace_dir
+
+    ws_dir = get_workspace_dir(workspace)
+    reports_dir = ws_dir / "research_reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    # Sanitize question for filename (take first 40 chars, remove special chars)
+    safe_q = "".join(c for c in question[:40] if c.isalnum() or c in " _-").strip()
+    safe_q = safe_q.replace(" ", "_") or "research"
+    report_file = reports_dir / f"{timestamp}_{safe_q}.md"
+
+    # Write report with metadata header
+    content = (
+        f"---\n"
+        f"question: {question}\n"
+        f"generated: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"type: research_report\n"
+        f"---\n\n"
+        f"# {question}\n\n"
+        f"{report}"
+    )
+    report_file.write_text(content, encoding="utf-8")
+
+    # Auto-ingest the report into the knowledge base
+    try:
+        from kbase.store import KBaseStore
+        from kbase.config import get_db_path, get_chroma_path
+        store = KBaseStore(str(get_db_path(workspace)), str(get_chroma_path(workspace)))
+        try:
+            ingest_file(store, str(report_file))
+        finally:
+            store.close()
+        print(f"[KBase] Research report saved and indexed: {report_file.name}")
+    except Exception as e:
+        print(f"[KBase] Research report saved but indexing failed: {e}")
+
+    # Add reports_dir to ingest_dirs if not already there
+    ingest_dirs = settings.get("ingest_dirs", [])
+    reports_dir_str = str(reports_dir)
+    if reports_dir_str not in ingest_dirs:
+        ingest_dirs.append(reports_dir_str)
+        settings["ingest_dirs"] = ingest_dirs
+        save_settings(workspace, settings)
+
+
 def create_app(workspace: str = "default") -> FastAPI:
     app = FastAPI(title="KBase", description="Local Knowledge Base API")
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -510,6 +562,14 @@ Question: {question}"""
                 _conversations[conv_id].append({"role": "assistant", "content": result.get("report", "")})
                 _save_conversations()
 
+                # Auto-save research report to file and index it
+                try:
+                    report_text = result.get("report", "")
+                    if report_text:
+                        _auto_save_research(report_text, question, workspace, settings_data)
+                except Exception as e:
+                    print(f"[KBase] Research auto-save failed: {e}")
+
                 q.put(json.dumps({
                     "type": "result",
                     "answer": result.get("report", ""),
@@ -914,7 +974,7 @@ del "%~f0" >nul 2>&1
         """Get file content preview by file_id — returns original chunks from ChromaDB."""
         store = get_store()
         c = store.conn.cursor()
-        c.execute("SELECT file_path, file_name, file_type, chunk_count, source_dir FROM files WHERE file_id = ?", (file_id,))
+        c.execute("SELECT file_path, file_name, file_type, chunk_count, source_dir, summary FROM files WHERE file_id = ?", (file_id,))
         row = c.fetchone()
         if not row:
             raise HTTPException(404, "File not found")
@@ -1242,6 +1302,69 @@ del "%~f0" >nul 2>&1
         result = compute_graph(store, threshold=0.65)
         return result
 
+    @app.post("/api/summaries/generate")
+    def api_summaries_generate():
+        """Backfill: generate LLM summaries for files that don't have one yet.
+        Returns SSE stream with progress."""
+        import queue as _queue, threading
+        q = _queue.Queue()
+        settings_data = load_settings(workspace)
+
+        def do_generate():
+            try:
+                store = get_store()
+                files = store.get_files_without_summary(limit=50)
+                if not files:
+                    q.put(json.dumps({"type": "done", "generated": 0, "message": "All files already have summaries"}))
+                    store.close()
+                    return
+
+                from kbase.chat import generate_document_summary
+                generated = 0
+                for i, f in enumerate(files):
+                    try:
+                        # Get file text from ChromaDB
+                        results = store.collection.get(
+                            where={"file_id": f["file_id"]},
+                            include=["documents"],
+                        )
+                        text = "\n".join(results.get("documents", [])[:5])
+                        if not text:
+                            continue
+
+                        summary = generate_document_summary(text, f["file_name"], settings_data)
+                        if summary:
+                            store.update_file_summary(f["file_id"], summary)
+                            generated += 1
+
+                        q.put(json.dumps({
+                            "type": "progress",
+                            "current": i + 1,
+                            "total": len(files),
+                            "file": f["file_name"],
+                            "has_summary": bool(summary),
+                        }))
+                    except Exception as e:
+                        q.put(json.dumps({"type": "error", "file": f["file_name"], "message": str(e)[:200]}))
+
+                q.put(json.dumps({"type": "done", "generated": generated, "total": len(files)}))
+                store.close()
+            except Exception as e:
+                q.put(json.dumps({"type": "error", "message": str(e)[:300]}))
+            finally:
+                q.put(None)
+
+        threading.Thread(target=do_generate, daemon=True).start()
+
+        def stream():
+            while True:
+                msg = q.get()
+                if msg is None:
+                    break
+                yield f"data: {msg}\n\n"
+
+        return StreamingResponse(stream(), media_type="text/event-stream")
+
     @app.get("/api/graph/stats")
     def api_graph_stats():
         """Get graph statistics."""
@@ -1369,6 +1492,48 @@ del "%~f0" >nul 2>&1
         settings_data = load_settings(workspace)
         new_mems = extract_memories_from_conversation(conv_id, settings_data)
         return {"extracted": new_mems, "total": len(get_memories())}
+
+    # ---- Search Feedback / Click Tracking API (Harness Sensor) ----
+
+    @app.post("/api/feedback/click")
+    async def api_feedback_click(request: Request):
+        """Record when user clicks a search result."""
+        body = await request.json()
+        store = get_store()
+        try:
+            store.record_click(
+                query=body.get("query", ""),
+                file_id=body.get("file_id", ""),
+                file_name=body.get("file_name", ""),
+                position=body.get("position", 0),
+            )
+            return {"status": "ok"}
+        finally:
+            store.close()
+
+    @app.post("/api/feedback/rate")
+    async def api_feedback_rate(request: Request):
+        """Record thumbs up/down on an answer."""
+        body = await request.json()
+        store = get_store()
+        try:
+            store.record_feedback(
+                query=body.get("query", ""),
+                file_id=body.get("file_id", ""),
+                action=body.get("action", "thumbs_up"),
+            )
+            return {"status": "ok"}
+        finally:
+            store.close()
+
+    @app.get("/api/user-interests")
+    def api_user_interests():
+        """Get top user query interests (lightweight memory)."""
+        store = get_store()
+        try:
+            return {"interests": store.get_top_interests(20)}
+        finally:
+            store.close()
 
     # ---- Directory Browser API ----
 

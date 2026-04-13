@@ -1,5 +1,6 @@
-"""Query routing with full enhancement pipeline:
-expand → retrieve → fuse → dedup → time-decay → rerank → recursive check.
+"""Query routing with full enhancement pipeline (14-stage adaptive):
+expand → retrieve → fuse → dedup → time-decay → rerank → recursive → parent-expand
+→ dir-priority → summary-boost → graph-boost → table-hint.
 """
 import math
 import re
@@ -25,6 +26,12 @@ def hybrid_search(store: KBaseStore, query: str, top_k: int = 10,
     Level 4: + recursive broadening (last resort)
     """
     methods = ["semantic", "keyword"]
+
+    # Record user query interests (lightweight, no LLM)
+    try:
+        store.record_query_interests(query)
+    except Exception:
+        pass
 
     # ── Level 1: Basic retrieval ──
     fetch_k = max(top_k * 5, 50)
@@ -121,7 +128,23 @@ def hybrid_search(store: KBaseStore, query: str, top_k: int = 10,
     fused = _apply_directory_priority(fused)
     methods.append("dir-priority")
 
-    # 10. Graph coherence boost — confirmed relationships boost search ranking
+    # 10. Click boost — files users frequently click get ranking boost (harness sensor)
+    try:
+        fused = _boost_with_clicks(store, fused)
+        if any(r.get("click_boosted") for r in fused):
+            methods.append("click-boost")
+    except Exception:
+        pass
+
+    # 11. Summary boost — use file-level LLM summaries for relevance (Karpathy LLM Wiki)
+    try:
+        fused = _boost_with_summaries(store, query, fused)
+        if any(r.get("summary_boosted") for r in fused):
+            methods.append("summary-boost")
+    except Exception:
+        pass
+
+    # 12. Graph coherence boost — confirmed relationships boost search ranking
     try:
         from kbase.graph import boost_search_with_graph
         fused = boost_search_with_graph(store, fused)
@@ -130,7 +153,7 @@ def hybrid_search(store: KBaseStore, query: str, top_k: int = 10,
     except Exception:
         pass  # graph module not available or no edges
 
-    # 11. Table hint detection
+    # 13. Table hint detection
     table_hint = _detect_table_query(query)
     table_results = None
     if table_hint:
@@ -373,6 +396,95 @@ def _expand_to_parents(store: KBaseStore, results: list) -> list:
         except Exception:
             pass
 
+    return results
+
+
+def _boost_with_clicks(store: KBaseStore, results: list) -> list:
+    """Boost search results using historical click data (harness sensor feedback).
+
+    Files that users frequently click in search results get a ranking boost.
+    """
+    if not results:
+        return results
+
+    file_ids = list(set(
+        r.get("metadata", {}).get("file_id", "") for r in results if r.get("metadata", {}).get("file_id")
+    ))
+    if not file_ids:
+        return results
+
+    click_scores = store.get_click_scores(file_ids)
+    if not click_scores:
+        return results
+
+    for r in results:
+        fid = r.get("metadata", {}).get("file_id", "")
+        if fid in click_scores:
+            boost = 0.02 * click_scores[fid]  # Up to 2% boost for most-clicked
+            score_key = "rerank_score" if "rerank_score" in r else "rrf_score"
+            if score_key in r:
+                r[score_key] = r[score_key] + boost
+            r["click_boosted"] = True
+
+    score_key = "rerank_score" if any("rerank_score" in r for r in results) else "rrf_score"
+    results.sort(key=lambda x: x.get(score_key, 0), reverse=True)
+    return results
+
+
+def _boost_with_summaries(store: KBaseStore, query: str, results: list) -> list:
+    """Boost search results using file-level LLM summaries.
+
+    If a file has a summary that matches the query keywords,
+    all chunks from that file get a relevance boost.
+    """
+    if not results:
+        return results
+
+    query_lower = query.lower()
+    query_terms = set(query_lower.split())
+
+    # Collect unique file_ids from results
+    file_ids = set()
+    for r in results:
+        fid = r.get("metadata", {}).get("file_id", "")
+        if fid:
+            file_ids.add(fid)
+
+    if not file_ids:
+        return results
+
+    # Fetch summaries for these files
+    summaries = {}
+    try:
+        c = store.conn.cursor()
+        placeholders = ",".join("?" for _ in file_ids)
+        c.execute(f"SELECT file_id, summary FROM files WHERE file_id IN ({placeholders})", list(file_ids))
+        for row in c.fetchall():
+            if row["summary"]:
+                summaries[row["file_id"]] = row["summary"].lower()
+    except Exception:
+        return results
+
+    if not summaries:
+        return results
+
+    # Compute match score: how many query terms appear in the summary
+    for r in results:
+        fid = r.get("metadata", {}).get("file_id", "")
+        summary = summaries.get(fid, "")
+        if summary:
+            hits = sum(1 for term in query_terms if term in summary)
+            if hits > 0:
+                ratio = hits / max(len(query_terms), 1)
+                boost = 0.03 * ratio  # Up to 3% boost
+                score_key = "rerank_score" if "rerank_score" in r else "rrf_score"
+                if score_key in r:
+                    r[score_key] = r[score_key] + boost
+                r["summary_boosted"] = True
+
+    # Re-sort by score
+    score_key = "rerank_score" if any("rerank_score" in r for r in results) else "rrf_score"
+    results.sort(key=lambda x: x.get(score_key, 0), reverse=True)
     return results
 
 

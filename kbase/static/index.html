@@ -187,6 +187,10 @@
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
           <span data-i18n="computeGraph">Compute</span>
         </button>
+        <button onclick="generateSummaries()" class="btn-outline" style="padding:4px 10px;font-size:12px;" title="Generate AI summaries for files">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          <span data-i18n="generateSummaries">Summarize</span>
+        </button>
         <button onclick="fitGraph()" class="btn-outline" style="padding:4px 10px;font-size:12px;" title="Fit to view">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
         </button>
@@ -413,31 +417,43 @@
         <div style="border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;">
           <h3 style="margin-bottom:12px;" data-i18n="set_chunk">Chunk, Search & Memory</h3>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;">
-            <div><label style="font-size:12px;color:var(--text-dim);">Chunk Max Size</label>
+            <div><label style="font-size:12px;color:var(--text-dim);" data-i18n="chunkMax">Chunk Max Size</label>
               <input id="set-chunk-max" type="number" value="1500" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);margin-top:4px;">
-              <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Characters per chunk</div></div>
-            <div><label style="font-size:12px;color:var(--text-dim);">Chunk Overlap</label>
+              <div style="font-size:10px;color:var(--text-muted);margin-top:2px;" data-i18n="charsPerChunk">Characters per chunk</div></div>
+            <div><label style="font-size:12px;color:var(--text-dim);" data-i18n="chunkOverlap">Chunk Overlap</label>
               <input id="set-chunk-overlap" type="number" value="200" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);margin-top:4px;">
-              <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Overlap between chunks</div></div>
-            <div><label style="font-size:12px;color:var(--text-dim);">Memory Turns</label>
+              <div style="font-size:10px;color:var(--text-muted);margin-top:2px;" data-i18n="overlapBetween">Overlap between chunks</div></div>
+            <div><label style="font-size:12px;color:var(--text-dim);" data-i18n="memoryTurns">Memory Turns</label>
               <input id="set-memory" type="number" value="10" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);margin-top:4px;">
-              <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Conversation history depth</div></div>
+              <div style="font-size:10px;color:var(--text-muted);margin-top:2px;" data-i18n="convDepth">Conversation history depth</div></div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
-            <div><label style="font-size:12px;color:var(--text-dim);">Search Top-K</label>
+            <div><label style="font-size:12px;color:var(--text-dim);" data-i18n="topK">Search Top-K</label>
               <input id="set-top-k" type="number" value="10" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);margin-top:4px;">
-              <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Results per search</div></div>
+              <div style="font-size:10px;color:var(--text-muted);margin-top:2px;" data-i18n="resultsPerSearch">Results per search</div></div>
             <div style="display:flex;flex-direction:column;justify-content:center;">
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);cursor:pointer;">
-                <input type="checkbox" id="set-rerank" checked style="accent-color:var(--accent);"> Re-ranking
+                <input type="checkbox" id="set-rerank" checked style="accent-color:var(--accent);"> <span data-i18n="reranking">Re-ranking</span>
               </label>
-              <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Cross-encoder rerank results</div>
+              <div style="font-size:10px;color:var(--text-muted);margin-top:2px;" data-i18n="crossEncoder">Cross-encoder rerank results</div>
             </div>
             <div style="display:flex;flex-direction:column;justify-content:center;">
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);cursor:pointer;">
-                <input type="checkbox" id="set-time-decay" checked style="accent-color:var(--accent);"> Time Decay
+                <input type="checkbox" id="set-time-decay" checked style="accent-color:var(--accent);"> <span data-i18n="timeDecay">Time Decay</span>
               </label>
-              <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Boost recent documents</div>
+              <div style="font-size:10px;color:var(--text-muted);margin-top:2px;" data-i18n="boostRecent">Boost recent documents</div>
+            </div>
+            <div style="display:flex;flex-direction:column;justify-content:center;">
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);cursor:pointer;">
+                <input type="checkbox" id="set-auto-summary" style="accent-color:var(--accent);"> <span data-i18n="autoSummary">Auto Summary</span>
+              </label>
+              <div style="font-size:10px;color:var(--text-muted);margin-top:2px;" data-i18n="autoSummaryDesc">LLM generates file summaries during ingest (uses tokens)</div>
+            </div>
+            <div style="display:flex;flex-direction:column;justify-content:center;">
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);cursor:pointer;">
+                <input type="checkbox" id="set-auto-edge-labels" style="accent-color:var(--accent);"> <span data-i18n="autoEdgeLabels">Auto Edge Labels</span>
+              </label>
+              <div style="font-size:10px;color:var(--text-muted);margin-top:2px;" data-i18n="autoEdgeLabelsDesc">LLM describes graph relationships (uses tokens)</div>
             </div>
           </div>
         </div>
@@ -454,8 +470,8 @@
           <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;" data-i18n="set_memory_desc">KBase remembers key facts across conversations.</p>
           <div id="set-memory-list" style="max-height:300px;overflow-y:auto;margin-bottom:12px;"></div>
           <div style="display:flex;gap:8px;">
-            <input id="memory-new-input" type="text" placeholder="Add a memory manually... / 手动添加记忆..." style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:13px;outline:none;">
-            <button class="btn-accent" onclick="addManualMemory()" style="white-space:nowrap;">Add</button>
+            <input id="memory-new-input" type="text" data-i18n-placeholder="addMemoryPlaceholder" placeholder="Add a memory manually..." style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:13px;outline:none;">
+            <button class="btn-accent" onclick="addManualMemory()" style="white-space:nowrap;" data-i18n="addMemory">Add</button>
           </div>
         </div>
 
@@ -466,7 +482,7 @@
             <span id="current-version" style="font-size:12px;color:var(--text-muted);"></span>
           </div>
           <div class="update-url-row">
-            <label>Update URL</label>
+            <label data-i18n="updateUrl">Update URL</label>
             <input id="set-update-url" type="text" placeholder="https://example.com/kbase/version.json">
           </div>
           <div class="update-actions">
@@ -507,7 +523,7 @@
           </div>
         </div>
 
-        <button class="btn-save-settings" onclick="saveAllSettings()">Save Settings</button>
+        <button class="btn-save-settings" onclick="saveAllSettings()" data-i18n="saveSettings">Save Settings</button>
         <div id="set-save-msg" style="text-align:center;margin-top:8px;"></div>
       </div>
     </div>
@@ -518,6 +534,8 @@
         <select class="ctrl-select" id="llm-select"></select>
         <select class="ctrl-select" id="buddy-select"></select>
         <div style="display:flex;gap:4px;" id="mode-btns">
+          <button class="mode-btn" data-mode="auto" onclick="setMode('auto')" title="Auto — AI detects intent and routes to the best search mode">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg><span data-i18n="modeAuto">Auto</span></button>
           <button class="mode-btn" data-mode="direct" onclick="setMode('direct')" title="Direct Chat — No search, just talk with AI + global memory">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>Direct</button>
           <button class="mode-btn active" data-mode="kb" onclick="setMode('kb')" title="Knowledge Base — Search only your local indexed files">

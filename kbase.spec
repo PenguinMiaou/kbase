@@ -33,6 +33,7 @@ a = Analysis(
         ('kbase', 'kbase'),
     ],
     hiddenimports=[
+        'setproctitle',
         'kbase', 'kbase.web', 'kbase.cli', 'kbase.store', 'kbase.chat',
         'kbase.search', 'kbase.enhance', 'kbase.extract', 'kbase.chunk',
         'kbase.ingest', 'kbase.config', 'kbase.websearch', 'kbase.agent_loop',
@@ -106,8 +107,8 @@ app = BUNDLE(
     info_plist={
         'CFBundleName': 'KBase',
         'CFBundleDisplayName': 'KBase',
-        'CFBundleVersion': '0.5.1',
-        'CFBundleShortVersionString': '0.5.1',
+        'CFBundleVersion': '0.6.0',
+        'CFBundleShortVersionString': '0.6.0',
         'NSHighResolutionCapable': True,
         'LSMinimumSystemVersion': '10.15',
         'NSHumanReadableCopyright': 'Copyright@PenguinMiaou',

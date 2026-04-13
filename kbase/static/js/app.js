@@ -428,14 +428,18 @@ async function doChat(){
         ${html}${sources}
         <div class="msg-meta">
           <span>${data.provider||''} | ${data.context_chunks||0} chunks | ${elapsed}s</span>
+          <button onclick="rateFeedback('thumbs_up',this)" title="Good answer" style="color:var(--text-muted);background:none;border:none;cursor:pointer;font-size:13px;padding:2px 4px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 00-3-3l-4 9v11h11.28a2 2 0 002-1.7l1.38-9a2 2 0 00-2-2.3H14z"/><path d="M7 22H4a2 2 0 01-2-2v-7a2 2 0 012-2h3"/></svg></button>
+          <button onclick="rateFeedback('thumbs_down',this)" title="Bad answer" style="color:var(--text-muted);background:none;border:none;cursor:pointer;font-size:13px;padding:2px 4px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 003 3l4-9V2H5.72a2 2 0 00-2 1.7l-1.38 9a2 2 0 002 2.3H10z"/><path d="M17 2h3a2 2 0 012 2v7a2 2 0 01-2 2h-3"/></svg></button>
           <button onclick="rewindChat()" style="color:var(--text-muted);background:none;border:none;cursor:pointer;font-size:11px;display:flex;align-items:center;gap:4px;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>Rewind</button>
         </div>`;
     }
     // Auto-generate title after first response
     if(isFirstMsg){removeSkeletonFromSidebar();autoGenerateTitle();}
-    // Auto-extract memories every 3 turns (background, non-blocking)
-    if(chatTurns>0&&chatTurns%3===0){
+    // Auto-extract memories: first turn + every 3 turns (background, non-blocking)
+    if(isFirstMsg||chatTurns%3===0){
       fetch(`/api/memories/extract/${convId}`,{method:'POST'}).catch(()=>{});
     }
   }catch(e){
@@ -685,6 +689,23 @@ async function clearChat(){
   newChat();
 }
 
+function rateFeedback(action,btn){
+  const q=document.getElementById('chat-input')?.value?.trim()||'';
+  fetch('/api/feedback/rate',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({query:q,file_id:'',action:action})
+  }).catch(()=>{});
+  // Visual feedback
+  const parent=btn.parentElement;
+  if(parent){
+    parent.querySelectorAll('button').forEach(b=>{
+      if(b.title&&(b.title.includes('answer')||b.title.includes('Good')||b.title.includes('Bad'))){
+        b.style.opacity='0.3';b.style.pointerEvents='none';
+      }
+    });
+    btn.style.opacity='1';btn.style.color='var(--accent)';
+  }
+}
+
 async function rewindChat(){
   const el=document.getElementById('chat-messages');
   const userMsgs=el.querySelectorAll('.msg-user');
@@ -848,6 +869,10 @@ async function autoGenerateTitle(){
 }
 
 async function switchConv(id){
+  // Extract memories from previous conversation before switching (episodic memory)
+  if(convId&&convId!==id){
+    fetch(`/api/memories/extract/${convId}`,{method:'POST'}).catch(()=>{});
+  }
   convId=id;localStorage.setItem('kbase-conv-id',id);
   document.getElementById('chat-messages').innerHTML='';
   document.getElementById('chat-welcome').style.display='none';
@@ -1336,6 +1361,8 @@ async function loadSettingsPanel(){
   document.getElementById('set-top-k').value=s.top_k||10;
   document.getElementById('set-rerank').checked=s.use_rerank!==false;
   document.getElementById('set-time-decay').checked=s.time_decay!==false;
+  document.getElementById('set-auto-summary').checked=!!s.auto_summary;
+  document.getElementById('set-auto-edge-labels').checked=!!s.auto_edge_labels;
 
   // Current version display
   try{
@@ -1573,6 +1600,8 @@ async function saveAllSettings(){
   s.top_k=parseInt(document.getElementById('set-top-k').value)||10;
   s.use_rerank=document.getElementById('set-rerank').checked;
   s.time_decay=document.getElementById('set-time-decay').checked;
+  s.auto_summary=document.getElementById('set-auto-summary').checked;
+  s.auto_edge_labels=document.getElementById('set-auto-edge-labels').checked;
   const updUrl=document.getElementById('set-update-url');
   if(updUrl&&updUrl.value)s.update_url=updUrl.value;
   const cbp=document.getElementById('custom-buddy-prompt');
@@ -1972,7 +2001,7 @@ const I18N={
     set_lang:'语言配置',set_lang_desc:'优化分词和同义词扩展',
     set_chunk:'分块、搜索与记忆',
     set_buddy:'助手预设',
-    graphMode:'图谱',canvasMode:'白板',computeGraph:'计算关系',
+    graphMode:'图谱',canvasMode:'白板',computeGraph:'计算关系',generateSummaries:'生成摘要',
     editEdge:'编辑关系',edgeLabel:'标签',edgeDirection:'方向',edgeType:'类型',
     openFile:'打开文件',viewLocal:'查看局部图',pinNode:'固定位置',unpinNode:'取消固定',
     confirmEdge:'确认关系',deleteEdge:'删除关系',addLabel:'添加标签',
@@ -1981,8 +2010,12 @@ const I18N={
     set_memory:'全局记忆',set_memory_desc:'KBase 会记住关键事实，持续优化回答',
     chunkMax:'分块大小',chunkOverlap:'重叠长度',memoryTurns:'记忆轮数',
     topK:'搜索结果数',reranking:'重排序',timeDecay:'时间衰减',
+    autoSummary:'自动摘要',autoSummaryDesc:'导入时用LLM生成文件摘要（消耗Token）',
+    autoEdgeLabels:'自动标注关系',autoEdgeLabelsDesc:'计算图谱时用LLM描述关系（消耗Token）',
     charsPerChunk:'每块字符数',overlapBetween:'块间重叠',convDepth:'对话记忆深度',
     resultsPerSearch:'每次搜索返回数',crossEncoder:'交叉编码器重排',boostRecent:'提升新文档排名',
+    addMemory:'添加',addMemoryPlaceholder:'手动添加记忆...',updateUrl:'更新 URL',saveSettings:'保存设置',
+    modeAuto:'智能',
   },
   en:{
     newChat:'New Chat',chat:'Chat',search:'Search',sql:'SQL',files:'Files',ingest:'Ingest',
@@ -2010,7 +2043,7 @@ const I18N={
     set_lang:'Language Profile',set_lang_desc:'Optimizes segmentation and synonym expansion',
     set_chunk:'Chunk, Search & Memory',
     set_buddy:'Buddy Preset',
-    graphMode:'Graph',canvasMode:'Canvas',computeGraph:'Compute',
+    graphMode:'Graph',canvasMode:'Canvas',computeGraph:'Compute',generateSummaries:'Summarize',
     editEdge:'Edit Relationship',edgeLabel:'Label',edgeDirection:'Direction',edgeType:'Type',
     openFile:'Open File',viewLocal:'Local Graph',pinNode:'Pin Position',unpinNode:'Unpin',
     confirmEdge:'Confirm',deleteEdge:'Delete',addLabel:'Add Label',
@@ -2019,8 +2052,12 @@ const I18N={
     set_memory:'Global Memory',set_memory_desc:'KBase remembers key facts across conversations.',
     chunkMax:'Chunk Max Size',chunkOverlap:'Chunk Overlap',memoryTurns:'Memory Turns',
     topK:'Search Top-K',reranking:'Re-ranking',timeDecay:'Time Decay',
+    autoSummary:'Auto Summary',autoSummaryDesc:'LLM generates file summaries during ingest (uses tokens)',
+    autoEdgeLabels:'Auto Edge Labels',autoEdgeLabelsDesc:'LLM describes graph relationships (uses tokens)',
     charsPerChunk:'Characters per chunk',overlapBetween:'Overlap between chunks',convDepth:'Conversation history depth',
     resultsPerSearch:'Results per search',crossEncoder:'Cross-encoder rerank',boostRecent:'Boost recent documents',
+    addMemory:'Add',addMemoryPlaceholder:'Add a memory manually...',updateUrl:'Update URL',saveSettings:'Save Settings',
+    modeAuto:'Auto',
   },
 };
 function t(key){return (I18N[curLang]||I18N.en)[key]||key;}
@@ -2031,6 +2068,12 @@ function applyI18n(){
     const key=el.dataset.i18n;
     const val=t(key);
     if(val&&val!==key)el.textContent=val;
+  });
+  // Placeholder translations
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el=>{
+    const key=el.dataset.i18nPlaceholder;
+    const val=t(key);
+    if(val&&val!==key)el.placeholder=val;
   });
   // Sidebar tabs
   const tabLabels={chat:t('chat'),search:t('search'),sql:t('sql'),files:t('files'),ingest:t('ingest'),connectors:t('connectors'),settings:t('settings')};
@@ -2116,9 +2159,9 @@ function buildGraphStyle(){
   const textMuted=getCSSVar('--text-muted');
   const border=getCSSVar('--border');
   const bg=getCSSVar('--bg');
-  const edgeAutoColor=isDark?'rgba(148,163,184,0.18)':'rgba(0,0,0,0.1)';
-  const edgeConfirmedColor=isDark?'rgba(129,140,248,0.6)':'rgba(99,102,241,0.5)';
-  const edgeLabeledColor=isDark?'rgba(129,140,248,0.85)':'rgba(99,102,241,0.7)';
+  const edgeAutoColor=isDark?'rgba(148,163,184,0.45)':'rgba(0,0,0,0.12)';
+  const edgeConfirmedColor=isDark?'rgba(165,180,252,0.8)':'rgba(99,102,241,0.5)';
+  const edgeLabeledColor=isDark?'rgba(199,210,254,0.95)':'rgba(99,102,241,0.7)';
 
   return [
     // Nodes — size and opacity by degree (hub = large bright, leaf = small faint)
@@ -2350,9 +2393,36 @@ async function initGraph(){
     _cy.elements().removeClass('hover unhover connected-hover');
     hideGraphTooltip();
   });
-  // Edge hover
-  _cy.on('mouseover','edge',function(e){e.target.addClass('hover');});
-  _cy.on('mouseout','edge',function(e){e.target.removeClass('hover');});
+  // Edge hover — show label tooltip if available
+  _cy.on('mouseover','edge',function(e){
+    e.target.addClass('hover');
+    const label=e.target.data('label');
+    const score=e.target.data('score');
+    const method=e.target.data('method')||'';
+    if(label||score){
+      const tip=document.getElementById('graph-tooltip')||document.createElement('div');
+      tip.id='graph-tooltip';
+      tip.className='graph-tooltip';
+      let html=`<div style="font-size:12px;max-width:260px;">`;
+      if(label)html+=`<div style="font-weight:600;margin-bottom:2px;">${label}</div>`;
+      html+=`<div style="color:var(--text-muted);font-size:10px;">${Math.round((score||0)*100)}% ${method}</div>`;
+      html+=`</div>`;
+      tip.innerHTML=html;
+      tip.style.display='block';
+      const pos=e.renderedPosition||e.target.midpoint();
+      const container=document.getElementById('graph-container');
+      if(container&&pos){
+        const rect=container.getBoundingClientRect();
+        tip.style.left=(rect.left+pos.x+10)+'px';
+        tip.style.top=(rect.top+pos.y-30)+'px';
+      }
+      if(!tip.parentNode)document.body.appendChild(tip);
+    }
+  });
+  _cy.on('mouseout','edge',function(e){
+    e.target.removeClass('hover');
+    hideGraphTooltip();
+  });
 
   // Node tap: single=preview, double=local graph, shift=connect (canvas)
   let _tapTimer=null;
@@ -2676,8 +2746,42 @@ async function computeGraph(){
   if(st)st.innerHTML=`<span style="color:var(--accent);">${t('computing')}</span>`;
   try{
     const d=await api('/api/graph/compute',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-    if(st)st.innerHTML=`<span style="color:var(--green);">${t('computed')}: ${d.edges_computed||0} edges (${d.edges_semantic||0} semantic, ${d.edges_path||0} path)</span>`;
+    const labelInfo=d.edges_labeled?`, ${d.edges_labeled} labeled`:'';
+    if(st)st.innerHTML=`<span style="color:var(--green);">${t('computed')}: ${d.edges_computed||0} edges (${d.edges_semantic||0} semantic, ${d.edges_path||0} path${labelInfo})</span>`;
     await loadGraphData();
+  }catch(e){
+    if(st)st.innerHTML=`<span style="color:var(--red);">Error: ${esc(e.message)}</span>`;
+  }
+}
+
+async function generateSummaries(){
+  const st=document.getElementById('graph-statusbar');
+  if(st)st.innerHTML=`<span style="color:var(--accent);">Generating AI summaries...</span>`;
+  try{
+    const resp=await fetch('/api/summaries/generate',{method:'POST'});
+    const reader=resp.body.getReader();
+    const decoder=new TextDecoder();
+    let buffer='';
+    while(true){
+      const{done,value}=await reader.read();
+      if(done)break;
+      buffer+=decoder.decode(value,{stream:true});
+      const lines=buffer.split('\n');
+      buffer=lines.pop()||'';
+      for(const line of lines){
+        if(!line.startsWith('data: '))continue;
+        try{
+          const ev=JSON.parse(line.slice(6));
+          if(ev.type==='progress'&&st){
+            st.innerHTML=`<span style="color:var(--accent);">Summarizing ${ev.current}/${ev.total}: ${esc(ev.file||'')}</span>`;
+          }else if(ev.type==='done'&&st){
+            st.innerHTML=`<span style="color:var(--green);">Summaries generated: ${ev.generated||0}/${ev.total||0} files</span>`;
+          }else if(ev.type==='error'&&st){
+            st.innerHTML=`<span style="color:var(--red);">Error: ${esc(ev.message||'')}</span>`;
+          }
+        }catch(_){}
+      }
+    }
   }catch(e){
     if(st)st.innerHTML=`<span style="color:var(--red);">Error: ${esc(e.message)}</span>`;
   }
@@ -2809,9 +2913,15 @@ function showGraphTooltip(evt,node){
   const d=node.data();
   const tip=document.createElement('div');
   tip.className='graph-tooltip';
-  tip.innerHTML=`<div class="tt-name">${esc(d.label)}</div>`
+  let tipHtml=`<div class="tt-name">${esc(d.label)}</div>`
     +`<div class="tt-type">${(d.file_type||'').toUpperCase()} &middot; ${d.degree} connections</div>`
     +`<div class="tt-dir">${esc(d.file_path||'')}</div>`;
+  if(d.summary){
+    // Show first line of summary (the Description)
+    const firstLine=(d.summary.split('\n').find(l=>l.includes('Description'))||d.summary.split('\n')[0]||'').replace(/^\*+/,'').replace(/\*+$/,'').trim();
+    if(firstLine)tipHtml+=`<div style="margin-top:4px;font-size:11px;color:var(--text-dim);max-width:300px;line-height:1.4;">${esc(firstLine)}</div>`;
+  }
+  tip.innerHTML=tipHtml;
   const pos=node.renderedPosition();
   const container=document.getElementById('graph-container');
   const rect=container.getBoundingClientRect();
@@ -3027,6 +3137,20 @@ function selectSearchResult(el){
   el.classList.add('active');
   el.style.borderColor='var(--accent)';
   el.style.background='var(--accent-light)';
+  // Track click for search feedback (harness sensor)
+  const q=document.getElementById('search-q')?.value?.trim()||'';
+  const cards=document.querySelectorAll('.search-result-card');
+  const pos=Array.from(cards).indexOf(el);
+  try{
+    const onclickStr=el.getAttribute('onclick')||'';
+    const idMatch=onclickStr.match(/id:'([^']+)'/);
+    const nameMatch=onclickStr.match(/label:'([^']+)'/);
+    if(idMatch&&q){
+      fetch('/api/feedback/click',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({query:q,file_id:idMatch[1],file_name:nameMatch?nameMatch[1]:'',position:pos})
+      }).catch(()=>{});
+    }
+  }catch(_){}
 }
 function showFilePreviewByMeta(meta){
   showFilePreview(meta);
@@ -3225,6 +3349,14 @@ async function showFilePreview(nodeData){
         </button>
       </div>
     </div>`;
+
+    // LLM Summary (Karpathy LLM Wiki-inspired)
+    if(d.summary){
+      html+=`<div style="padding:10px 14px;background:var(--bg-secondary);border-radius:8px;margin-bottom:16px;border-left:3px solid var(--accent);">
+        <h4 style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">AI Summary</h4>
+        <div style="font-size:12px;color:var(--text);line-height:1.6;white-space:pre-wrap;">${esc(d.summary)}</div>
+      </div>`;
+    }
 
     // Related documents
     if(d.edges&&d.edges.length>0){

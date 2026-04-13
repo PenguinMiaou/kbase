@@ -37,9 +37,9 @@ KBase 一次索引所有文件，然后让你**在一个地方搜索所有文档
 
 ## 功能特性
 
-### 13 阶段自适应搜索管线
+### 15 阶段自适应搜索管线
 
-不只是关键词匹配。KBase 运行**13 阶段检索管线**，根据查询难度自动升级：
+不只是关键词匹配。KBase 运行**15 阶段检索管线**，根据查询难度自动升级：
 
 ```
 Query -> 同义词扩展 -> [HyDE -> 多角度重写]* -> 语义 + 关键词 + 文件名
@@ -141,11 +141,11 @@ DuckDuckGo / Brave / Google (Serper) / Bing 国际版 / 搜狗 / 微信文章，
 
 ### macOS (DMG)
 
-从 [Releases](https://github.com/PenguinMiaou/kbase/releases) 下载 `KBase-0.5.1.dmg` -> 拖到 Applications -> 打开。
+从 [Releases](https://github.com/PenguinMiaou/kbase/releases) 下载 `KBase-0.6.0.dmg` -> 拖到 Applications -> 打开。
 
 ### Windows (EXE)
 
-从 [Releases](https://github.com/PenguinMiaou/kbase/releases) 下载 `KBase-0.5.1-Windows.zip` -> 解压 -> 运行 `KBase.exe`。
+从 [Releases](https://github.com/PenguinMiaou/kbase/releases) 下载 `KBase-0.6.0-Windows.zip` -> 解压 -> 运行 `KBase.exe`。
 
 ### 从源码
 

@@ -4,6 +4,13 @@ import sys
 import time
 from pathlib import Path
 
+# Set process name to "kbase" instead of "python3"
+try:
+    import setproctitle
+    setproctitle.setproctitle("kbase")
+except ImportError:
+    pass
+
 import click
 from rich.console import Console
 from rich.table import Table
