@@ -1143,8 +1143,12 @@ async function loadSettingsPanel(){
   const updEl=document.getElementById('set-update-url');
   if(updEl)updEl.value=s.update_url||'https://raw.githubusercontent.com/PenguinMiaou/kbase/main/version.json';
 
-  // Load model download status
-  loadModelStatus();
+  // Load model download status, then refresh config panels
+  await loadModelStatus();
+  // Re-render configs after status is loaded (fixes Download vs Downloaded on first load)
+  showProviderConfig(s.embedding_model||'bge-small-zh','embedding');
+  showProviderConfig(s.whisper_model||'whisper-base','whisper');
+  showProviderConfig(s.llm_provider||'claude-sonnet','llm');
   // Load global memory
   loadMemoryList();
 }
