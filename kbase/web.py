@@ -534,6 +534,30 @@ Question: {question}"""
         ollama_available = shutil.which("ollama") is not None
         status["ollama"] = {"downloaded": ollama_available, "type": "llm"}
 
+        # Check CLI tools (claude, qwen, llm)
+        # Expand PATH to find nvm/homebrew/cargo installed tools
+        import os as _os
+        extra_paths = ["/usr/local/bin", "/opt/homebrew/bin",
+                       str(Path.home() / ".local" / "bin"),
+                       str(Path.home() / ".npm-global" / "bin"),
+                       str(Path.home() / ".cargo" / "bin")]
+        nvm_dir = Path.home() / ".nvm" / "versions" / "node"
+        if nvm_dir.exists():
+            for node_ver in sorted(nvm_dir.iterdir(), reverse=True):
+                extra_paths.append(str(node_ver / "bin"))
+        orig_path = _os.environ.get("PATH", "")
+        _os.environ["PATH"] = _os.pathsep.join(extra_paths) + _os.pathsep + orig_path
+
+        cli_checks = {
+            "claude-cli": "claude",
+            "qwen-cli": "qwen",
+            "llm-cli": "llm",
+        }
+        for key, cmd in cli_checks.items():
+            status[key] = {"downloaded": shutil.which(cmd) is not None, "type": "llm"}
+
+        _os.environ["PATH"] = orig_path  # Restore
+
         return {"status": status}
 
     # ---- Auto-Update API ----
