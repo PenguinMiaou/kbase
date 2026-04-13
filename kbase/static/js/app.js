@@ -1127,12 +1127,16 @@ async function loadSettingsPanel(){
     const name=curLang==='zh'?(b.name_zh||b.name):b.name;
     const desc=curLang==='zh'?(b.desc_zh||b.desc):b.desc;
     const mbti=b.mbti?`<span style="font-size:9px;padding:1px 4px;border-radius:3px;background:var(--accent-light);color:var(--accent);font-weight:500;">${b.mbti}</span>`:'';
-    return `<div class="mode-btn ${isActive?'active':''}" data-mode="${k}" onclick="pickSet(this,'buddy','${k}')${k==='custom'?';showCustomBuddyPrompt()':''}" style="padding:10px;flex-direction:column;align-items:flex-start;gap:4px;">
-      <div style="display:flex;align-items:center;gap:6px;width:100%;">
-        <span style="font-size:13px;font-weight:500;">${name}</span>
-        ${mbti}
+    const avatar=b.avatar?`<img src="${b.avatar}" style="width:36px;height:36px;border-radius:8px;object-fit:cover;flex-shrink:0;">`:'';
+    return `<div class="mode-btn ${isActive?'active':''}" data-mode="${k}" onclick="pickSet(this,'buddy','${k}')${k==='custom'?';showCustomBuddyPrompt()':''}" style="padding:10px;flex-direction:row;align-items:center;gap:10px;">
+      ${avatar}
+      <div style="flex:1;min-width:0;">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="font-size:13px;font-weight:500;">${name}</span>
+          ${mbti}
+        </div>
+        <div style="font-size:10px;color:var(--text-muted);line-height:1.3;margin-top:2px;">${desc}</div>
       </div>
-      <div style="font-size:10px;color:var(--text-muted);line-height:1.3;">${desc}</div>
     </div>`;
   }).join('');
   // Show custom prompt input if custom is selected

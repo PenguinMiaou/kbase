@@ -187,7 +187,7 @@ BUDDY_PRESETS = {
     "analyst": {
         "name": "Analyst",
         "name_zh": "数据分析师",
-        "avatar": "/static/logos/buddy-analyst.svg",
+        "avatar": "/static/logos/buddy-analyst.webp",
         "mbti": "INTJ",
         "desc": "Data-driven, finds patterns and insights",
         "desc_zh": "数据驱动，擅长从数据中挖掘洞察和趋势",
@@ -201,7 +201,7 @@ BUDDY_PRESETS = {
     "tutor": {
         "name": "Tutor",
         "name_zh": "导师",
-        "avatar": "/static/logos/buddy-tutor.svg",
+        "avatar": "/static/logos/buddy-tutor.png",
         "mbti": "INFJ",
         "desc": "Patient teacher, explains complex topics simply",
         "desc_zh": "耐心的老师，善于把复杂概念讲清楚",
@@ -229,7 +229,7 @@ BUDDY_PRESETS = {
     "executive": {
         "name": "Executive",
         "name_zh": "高管助理",
-        "avatar": "/static/logos/buddy-exec.svg",
+        "avatar": "/static/logos/buddy-exec.webp",
         "mbti": "ENTJ",
         "desc": "Strategic, concise, decision-focused",
         "desc_zh": "战略视角，简洁高效，聚焦决策",
@@ -244,7 +244,7 @@ BUDDY_PRESETS = {
     "custom": {
         "name": "Custom",
         "name_zh": "自定义",
-        "avatar": "/static/logos/buddy-custom.svg",
+        "avatar": "/static/logos/buddy-custom.webp",
         "mbti": "",
         "desc": "Define your own AI personality",
         "desc_zh": "自定义 AI 人格和行为",

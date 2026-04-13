@@ -37,18 +37,38 @@ def open_browser():
             time.sleep(0.5)
 
 
-def is_port_in_use(port=8765):
-    """Check if KBase is already running."""
-    import socket
+def check_existing_instance(port=8765):
+    """Check if KBase is already running and healthy."""
+    import socket, urllib.request
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(('127.0.0.1', port)) == 0
+        if s.connect_ex(('127.0.0.1', port)) != 0:
+            return "not_running"
+    # Port in use — check if it's a healthy KBase
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/version", timeout=2) as resp:
+            return "healthy"
+    except Exception:
+        return "zombie"  # Port occupied but not responding
 
 
 def main():
-    # If already running, just open browser and exit
-    if is_port_in_use():
+    status = check_existing_instance()
+    if status == "healthy":
+        # Already running, just open browser
         webbrowser.open("http://127.0.0.1:8765/")
         return
+    elif status == "zombie":
+        # Kill zombie process holding the port
+        import subprocess
+        subprocess.run(["lsof", "-ti:8765"], capture_output=True)
+        result = subprocess.run(["lsof", "-ti:8765"], capture_output=True, text=True)
+        for pid in result.stdout.strip().split("\n"):
+            if pid.strip():
+                try:
+                    os.kill(int(pid.strip()), 9)
+                except (ValueError, ProcessLookupError):
+                    pass
+        time.sleep(1)
 
     # Start server in a subprocess
     server_proc = multiprocessing.Process(target=start_server, daemon=True)
