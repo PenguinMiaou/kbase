@@ -173,7 +173,14 @@ def create_app(workspace: str = "default") -> FastAPI:
         import time as _time
         now = _time.time()
         result = []
+        # Handle both dict and list formats
+        if isinstance(dirs, list):
+            dirs = {d: {"enabled": True} for d in dirs if isinstance(d, str)}
+        if not isinstance(dirs, dict):
+            dirs = {}
         for path, info in dirs.items():
+            if not isinstance(info, dict):
+                info = {"enabled": True}
             elapsed = now - info.get("last_sync", 0)
             if elapsed < 60:
                 ago = f"{int(elapsed)}s ago"
