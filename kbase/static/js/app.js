@@ -1539,59 +1539,141 @@ function showCustomBuddyPrompt(){
 }
 
 // === Auto-Update ===
+let _updateInfo=null; // cache update check result
 async function checkUpdate(){
   const st=document.getElementById('update-status');
   const btn=document.getElementById('btn-apply-update');
+  const prog=document.getElementById('update-progress');
   st.innerHTML='<span style="color:var(--text-muted);">Checking...</span>';
   btn.style.display='none';
+  if(prog)prog.style.display='none';
   try{
     const d=await api('/api/update/check');
+    _updateInfo=d;
     if(d.error){
       st.innerHTML=`<span style="color:var(--yellow);">${esc(d.error)}</span>`;
     }else if(d.update_available){
-      st.innerHTML=`<span style="color:var(--green);font-weight:500;">New version ${esc(d.latest)} available!</span>`
-        +(d.changelog?`<div style="margin-top:4px;color:var(--text-dim);">${esc(d.changelog)}</div>`:'');
-      // Show appropriate button
+      st.innerHTML=`<span style="color:var(--green);font-weight:500;">${t('updateAvailable')}: v${esc(d.latest)}</span>`
+        +(d.changelog?`<div style="margin-top:4px;color:var(--text-dim);font-size:12px;">${esc(d.changelog)}</div>`:'');
       const ver=await api('/api/version');
+      const btnSpan=btn.querySelector('span[data-i18n]');
       if(ver.install_type==='git'){
-        btn.textContent='Update Now (git pull)';
-        btn.style.display='inline-block';
-      }else if(d.download_url){
-        btn.textContent='Download Update';
-        btn.onclick=()=>window.open(d.download_url,'_blank');
-        btn.style.display='inline-block';
+        if(btnSpan)btnSpan.textContent=t('updateNow')+' (git pull)';
+        btn.onclick=applyUpdateGit;
+      }else{
+        if(btnSpan)btnSpan.textContent=t('updateNow');
+        btn.onclick=applyUpdateBinary;
       }
+      btn.style.display='inline-flex';
+      btn.disabled=false;
     }else{
-      st.innerHTML=`<span style="color:var(--green);">Already up to date (v${esc(d.current)})</span>`;
+      st.innerHTML=`<span style="color:var(--green);">${t('upToDate')} (v${esc(d.current)})</span>`;
     }
   }catch(e){
-    st.innerHTML=`<span style="color:var(--red,#ef4444);">Check failed: ${esc(e.message)}</span>`;
+    st.innerHTML=`<span style="color:var(--red,#ef4444);">${esc(e.message)}</span>`;
   }
 }
 
-async function applyUpdate(){
+async function applyUpdateGit(){
   const st=document.getElementById('update-status');
   const btn=document.getElementById('btn-apply-update');
   btn.disabled=true;
-  btn.textContent='Updating...';
-  st.innerHTML='<span style="color:var(--text-muted);">Pulling latest code...</span>';
+  const btnSpan=btn.querySelector('span[data-i18n]');
+  if(btnSpan)btnSpan.textContent=curLang==='zh'?'更新中...':'Updating...';
+  st.innerHTML=`<span style="color:var(--text-muted);">${curLang==='zh'?'正在拉取最新代码...':'Pulling latest code...'}</span>`;
   try{
     const d=await api('/api/update/apply',{method:'POST'});
     if(d.success){
       st.innerHTML=`<span style="color:var(--green);font-weight:500;">${esc(d.message)}</span>`;
       btn.style.display='none';
       if(d.need_restart){
-        st.innerHTML+=`<div style="margin-top:8px;"><button onclick="location.reload()" style="padding:6px 12px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;">Reload Page</button></div>`;
+        st.innerHTML+=`<div style="margin-top:8px;"><button onclick="location.reload()" style="padding:6px 12px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;">${curLang==='zh'?'刷新页面':'Reload Page'}</button></div>`;
       }
     }else{
       st.innerHTML=`<span style="color:var(--red,#ef4444);">${esc(d.message)}</span>`;
       btn.disabled=false;
-      btn.textContent='Retry Update';
+      if(btnSpan)btnSpan.textContent=curLang==='zh'?'重试':'Retry';
     }
   }catch(e){
-    st.innerHTML=`<span style="color:var(--red,#ef4444);">Update failed: ${esc(e.message)}</span>`;
+    st.innerHTML=`<span style="color:var(--red,#ef4444);">${esc(e.message)}</span>`;
     btn.disabled=false;
-    btn.textContent='Retry Update';
+    if(btnSpan)btnSpan.textContent=curLang==='zh'?'重试':'Retry';
+  }
+}
+
+async function applyUpdateBinary(){
+  const st=document.getElementById('update-status');
+  const btn=document.getElementById('btn-apply-update');
+  const prog=document.getElementById('update-progress');
+  const progBar=document.getElementById('update-progress-bar');
+  const progText=document.getElementById('update-progress-text');
+  btn.disabled=true;
+  const btnSpan=btn.querySelector('span[data-i18n]');
+  if(btnSpan)btnSpan.textContent=curLang==='zh'?'下载中...':'Downloading...';
+  st.innerHTML='';
+  if(prog){prog.style.display='block';progBar.style.width='0%';}
+
+  try{
+    const es=new EventSource('/api/update/download');
+    es.onmessage=function(ev){
+      const d=JSON.parse(ev.data);
+      if(d.stage==='checking'){
+        if(progText)progText.textContent=curLang==='zh'?'检查更新...':'Checking...';
+      }else if(d.stage==='downloading'){
+        if(d.progress!==undefined){
+          if(progBar)progBar.style.width=d.progress+'%';
+          if(progText)progText.textContent=`${d.downloaded_mb} / ${d.total_mb} MB (${d.progress}%)`;
+        }else{
+          if(progText)progText.textContent=curLang==='zh'?`下载 v${d.version}...`:`Downloading v${d.version}...`;
+        }
+      }else if(d.stage==='downloaded'){
+        es.close();
+        if(progBar)progBar.style.width='100%';
+        if(progText)progText.textContent=curLang==='zh'?'下载完成':'Download complete';
+        // Show install + restart button
+        st.innerHTML=`<div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+          <button onclick="installUpdate()" style="padding:8px 16px;background:var(--accent);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;">
+            ${curLang==='zh'?'安装并重启':'Install & Restart'}
+          </button>
+          <span style="font-size:12px;color:var(--text-dim);">${curLang==='zh'?'KBase 将自动重启':'KBase will restart automatically'}</span>
+        </div>`;
+        btn.style.display='none';
+      }else if(d.stage==='error'){
+        es.close();
+        if(prog)prog.style.display='none';
+        st.innerHTML=`<span style="color:var(--red,#ef4444);">${esc(d.message)}</span>`;
+        btn.disabled=false;
+        if(btnSpan)btnSpan.textContent=curLang==='zh'?'重试':'Retry';
+      }
+    };
+    es.onerror=function(){
+      es.close();
+      if(prog)prog.style.display='none';
+      st.innerHTML=`<span style="color:var(--red,#ef4444);">${curLang==='zh'?'下载失败':'Download failed'}</span>`;
+      btn.disabled=false;
+      if(btnSpan)btnSpan.textContent=curLang==='zh'?'重试':'Retry';
+    };
+  }catch(e){
+    if(prog)prog.style.display='none';
+    st.innerHTML=`<span style="color:var(--red,#ef4444);">${esc(e.message)}</span>`;
+    btn.disabled=false;
+    if(btnSpan)btnSpan.textContent=curLang==='zh'?'重试':'Retry';
+  }
+}
+
+async function installUpdate(){
+  const st=document.getElementById('update-status');
+  st.innerHTML=`<span style="color:var(--text-muted);">${curLang==='zh'?'正在安装更新，KBase 即将重启...':'Installing update, KBase will restart...'}</span>`;
+  try{
+    await api('/api/update/install',{method:'POST'});
+    // Server will shutdown — show reconnect message
+    st.innerHTML=`<span style="color:var(--green);font-weight:500;">${curLang==='zh'?'更新完成，正在重启...请稍候刷新页面':'Update installed. Restarting... Refresh page shortly.'}</span>`;
+    // Auto-reload after delay
+    setTimeout(()=>{
+      st.innerHTML+=`<div style="margin-top:8px;"><button onclick="location.reload()" style="padding:6px 12px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;">${curLang==='zh'?'刷新页面':'Reload Page'}</button></div>`;
+    },5000);
+  }catch(e){
+    st.innerHTML=`<span style="color:var(--red,#ef4444);">${esc(e.message)}</span>`;
   }
 }
 
@@ -1771,7 +1853,8 @@ const I18N={
     indexedFiles:'已索引文件',processing:'处理中...',
     embeddingModel:'Embedding 模型',whisperModel:'语音模型',llmModel:'对话模型',
     download:'下载',downloaded:'已下载',notInstalled:'未安装',
-    checkUpdate:'检查更新',upToDate:'已是最新版本',updateAvailable:'有新版本可用',
+    checkUpdate:'检查更新',upToDate:'已是最新版本',updateAvailable:'发现新版本',
+    updateNow:'立即更新',feedback:'反馈',reportIssue:'报告问题',
     shutdown:'关闭 KBase',shutdownConfirm:'确定关闭 KBase？',
     stopped:'已停止',removed:'已清理',
     // Settings
@@ -1803,6 +1886,7 @@ const I18N={
     embeddingModel:'Embedding Model',whisperModel:'Whisper Model',llmModel:'LLM Model',
     download:'Download',downloaded:'Downloaded',notInstalled:'Not installed',
     checkUpdate:'Check for Updates',upToDate:'Up to date',updateAvailable:'Update available',
+    updateNow:'Update Now',feedback:'Feedback',reportIssue:'Report an Issue',
     shutdown:'Shutdown KBase',shutdownConfirm:'Shutdown KBase?',
     stopped:'Stopped',removed:'Cleaned up',
     // Settings

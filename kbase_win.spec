@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for KBase macOS .app bundle."""
+"""PyInstaller spec for KBase Windows executable."""
 import os
 import sys
 
@@ -20,16 +20,16 @@ for root, dirs, files in os.walk(static_dir):
 # Collect connector templates
 connector_dir = os.path.join(project_dir, 'kbase', 'connectors')
 connector_files = []
-for f in os.listdir(connector_dir):
-    if f.endswith('.py') and not f.startswith('__'):
-        connector_files.append((os.path.join(connector_dir, f), 'kbase/connectors'))
+if os.path.isdir(connector_dir):
+    for f in os.listdir(connector_dir):
+        if f.endswith('.py') and not f.startswith('__'):
+            connector_files.append((os.path.join(connector_dir, f), 'kbase/connectors'))
 
 a = Analysis(
     ['launcher.py'],
     pathex=[project_dir],
     binaries=[],
     datas=static_files + connector_files + [
-        # Jieba dictionary
         ('kbase', 'kbase'),
     ],
     hiddenimports=[
@@ -52,20 +52,20 @@ a = Analysis(
         'chromadb.db', 'chromadb.db.impl', 'chromadb.db.impl.sqlite',
         'chromadb.migrations', 'chromadb.auth',
         'posthog', 'onnxruntime', 'tokenizers',
-        'objc', 'AppKit', 'Foundation',
         'jieba', 'jieba.posseg', 'jieba.analyse',
         'pptx', 'docx', 'openpyxl', 'fitz',
         'click', 'rich', 'watchdog',
         'multipart', 'email', 'email.mime',
-        'tkinter',
         'sqlite3',
+        'pystray', 'PIL',
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=['matplotlib', 'scipy', 'notebook', 'IPython',
               'torch', 'torchvision', 'torchaudio', 'sentence_transformers',
-              'transformers', 'safetensors'],
+              'transformers', 'safetensors',
+              'objc', 'AppKit', 'Foundation'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -84,8 +84,8 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=False,  # No terminal window
-    target_arch=None,  # Use native arch (arm64 on Apple Silicon, x86_64 on Intel)
+    console=False,  # No terminal window (GUI mode)
+    icon='build\\KBase.ico' if os.path.exists('build\\KBase.ico') else None,
 )
 
 coll = COLLECT(
@@ -96,25 +96,4 @@ coll = COLLECT(
     strip=False,
     upx=False,
     name='KBase',
-)
-
-app = BUNDLE(
-    coll,
-    name='KBase.app',
-    icon='build/KBase.icns',  # Will create icon separately
-    bundle_identifier='com.penguinmiaou.kbase',
-    info_plist={
-        'CFBundleName': 'KBase',
-        'CFBundleDisplayName': 'KBase',
-        'CFBundleVersion': '0.4.0',
-        'CFBundleShortVersionString': '0.4.0',
-        'NSHighResolutionCapable': True,
-        'LSMinimumSystemVersion': '10.15',
-        'NSHumanReadableCopyright': 'Copyright@PenguinMiaou',
-        # File access permissions (triggers macOS permission dialog)
-        'NSDocumentsFolderUsageDescription': 'KBase needs access to index your documents.',
-        'NSDownloadsFolderUsageDescription': 'KBase needs access to index files in Downloads.',
-        'NSDesktopFolderUsageDescription': 'KBase needs access to index files on Desktop.',
-        'NSAppleEventsUsageDescription': 'KBase uses this to open the folder picker dialog.',
-    },
 )

@@ -40,10 +40,13 @@ kbase/
 │       ├── css/app.css  # Styles (animations, transitions, source preview popup, skeleton loading)
 │       ├── js/app.js    # Frontend logic (i18n, session titles, memory, model status, auto-update, progress)
 │       └── logos/       # Provider logos (26+ SVG/PNG/WebP)
-├── launcher.py          # macOS .app entry point (starts server + opens browser + Tkinter status window)
-├── kbase.spec           # PyInstaller spec for DMG build
-├── build_dmg.sh         # One-click DMG builder script
-├── version.json         # Remote version manifest for auto-update
+├── launcher.py          # Cross-platform app entry point (macOS menu bar / Windows system tray / generic)
+├── kbase.spec           # PyInstaller spec for macOS DMG build
+├── kbase_win.spec       # PyInstaller spec for Windows EXE build
+├── build_dmg.sh         # One-click macOS DMG builder script
+├── build_exe.bat        # One-click Windows EXE builder script
+├── .github/workflows/release.yml  # GitHub Actions CI — auto-build DMG + EXE on tag push
+├── version.json         # Remote version manifest (multi-platform download URLs)
 ├── install.sh / install.bat  # One-click install (CLI wrapper = kbase-cli, not kbase to avoid dir conflict)
 ├── setup.py
 ├── requirements.txt
@@ -91,15 +94,20 @@ ollama, claude-cli (`claude -p`), qwen-cli (`qwen -p`), llm-cli (`llm`), custom 
 - **`/api/update/check`**: Checks remote `version.json` URL (configurable in Settings as `update_url`)
 - **`/api/update/apply`**: For git installs: `git pull --ff-only` + `pip install -e .`
 - **DMG installs**: Shows download link to new DMG from `version.json.download_url`
-- **`version.json` format**: `{"version": "0.2.0", "download_url": "https://...", "changelog": "..."}`
+- **`version.json` format**: `{"version": "0.4.0", "download_url": "...", "download_url_mac": "...", "download_url_win": "...", "changelog": "..."}`
+- **One-click update**: `/api/update/download` (SSE with progress) → `/api/update/install` (download DMG/ZIP, run updater script, restart)
 
 ## Distribution
 - **Source install**: `git clone` + `bash install.sh` → creates `.venv` + `kbase-cli` wrapper
-- **DMG install**: `bash build_dmg.sh` → `dist/KBase-0.1.0.dmg` (PyInstaller, ~224MB)
+- **DMG install**: `bash build_dmg.sh` → `dist/KBase-{VERSION}.dmg` (PyInstaller)
   - Double-click DMG → drag to Applications → opens browser automatically
-  - Tkinter status window with "Open in Browser" / "Quit" buttons
+  - macOS menu bar "KB" icon (NSApplicationActivationPolicyAccessory)
   - Icon: purple gradient rounded rect + white K (from kbase-logo.svg)
-- **Windows**: `install.bat` → creates `.venv` + `kbase.bat` wrapper
+- **Windows EXE**: `build_exe.bat` → `dist/KBase-{VERSION}-Windows.zip` (PyInstaller)
+  - Extract and run KBase.exe → opens browser automatically
+  - System tray icon (pystray) with "Open in Browser" / "Quit"
+- **Windows source**: `install.bat` → creates `.venv` + `kbase.bat` wrapper
+- **GitHub Actions CI**: Push `v*` tag → auto-builds macOS DMG + Windows EXE → uploads to GitHub Releases
 
 ## UI Features (New)
 - **Session management**: Auto-generated titles, sidebar date grouping (Today/Yesterday/7 Days/Older), timestamps

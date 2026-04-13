@@ -1,5 +1,7 @@
 {
-  "version": "0.3.0",
+  "version": "0.4.0",
   "download_url": "https://github.com/PenguinMiaou/kbase/releases/latest",
-  "changelog": "v0.3.0: Vision LLM (8 models), multi-engine search (6 engines), auto-glossary, adaptive search, HyDE, parent-child chunks, Settings i18n"
+  "download_url_mac": "https://github.com/PenguinMiaou/kbase/releases/download/v0.4.0/KBase-0.4.0.dmg",
+  "download_url_win": "https://github.com/PenguinMiaou/kbase/releases/download/v0.4.0/KBase-0.4.0-Windows.zip",
+  "changelog": "v0.4.0: Windows EXE support, one-click update, GitHub Issues feedback, GitHub Actions CI/CD"
 }

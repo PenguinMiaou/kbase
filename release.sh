@@ -105,6 +105,9 @@ echo -e "${YELLOW}Bumping version: $CUR_VER → $NEW_VER${NC}"
 echo -e "${YELLOW}[1/5] Updating version references...${NC}"
 sed -i '' "s/__version__ = \"$CUR_VER\"/__version__ = \"$NEW_VER\"/" kbase/__init__.py
 sed -i '' "s/\"version\": \"$CUR_VER\"/\"version\": \"$NEW_VER\"/" version.json
+# Update download URLs in version.json
+sed -i '' "s|/v$CUR_VER/|/v$NEW_VER/|g" version.json
+sed -i '' "s/KBase-$CUR_VER/KBase-$NEW_VER/g" version.json
 sed -i '' "s/version=\"$CUR_VER\"/version=\"$NEW_VER\"/" setup.py
 sed -i '' "s/VERSION=\"$CUR_VER\"/VERSION=\"$NEW_VER\"/" build_dmg.sh
 sed -i '' "s/'CFBundleVersion': '$CUR_VER'/'CFBundleVersion': '$NEW_VER'/" kbase.spec

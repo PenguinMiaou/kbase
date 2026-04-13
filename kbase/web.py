@@ -684,38 +684,171 @@ Question: {question}"""
 
     @app.post("/api/update/apply")
     async def api_update_apply():
-        """Apply update — git pull for source installs."""
+        """Apply update — git pull for source installs, download+install for binary."""
         import subprocess
         repo_dir = Path(__file__).parent.parent
         git_dir = repo_dir / ".git"
-        if not git_dir.exists():
-            raise HTTPException(400, "Not a git install — download the latest DMG instead")
-        try:
-            # git pull
-            result = subprocess.run(
-                ["git", "pull", "--ff-only"],
-                cwd=str(repo_dir), capture_output=True, text=True, timeout=30,
-            )
-            if result.returncode != 0:
-                return {"success": False, "message": result.stderr.strip()}
-            # pip install -e . to pick up new deps
-            pip_result = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "-e", str(repo_dir), "-q"],
-                capture_output=True, text=True, timeout=120,
-            )
-            from kbase import __version__
-            import importlib, kbase
-            importlib.reload(kbase)
-            return {
-                "success": True,
-                "message": f"Updated to {kbase.__version__}. Restart server to apply.",
-                "git_output": result.stdout.strip(),
-                "need_restart": True,
-            }
-        except subprocess.TimeoutExpired:
-            return {"success": False, "message": "Update timed out"}
-        except Exception as e:
-            return {"success": False, "message": str(e)}
+        is_frozen = getattr(sys, 'frozen', False)
+
+        # Git install: git pull + pip install
+        if git_dir.exists() and not is_frozen:
+            try:
+                result = subprocess.run(
+                    ["git", "pull", "--ff-only"],
+                    cwd=str(repo_dir), capture_output=True, text=True, timeout=30,
+                )
+                if result.returncode != 0:
+                    return {"success": False, "message": result.stderr.strip()}
+                pip_result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "-e", str(repo_dir), "-q"],
+                    capture_output=True, text=True, timeout=120,
+                )
+                from kbase import __version__
+                import importlib, kbase
+                importlib.reload(kbase)
+                return {
+                    "success": True,
+                    "message": f"Updated to {kbase.__version__}. Restart server to apply.",
+                    "git_output": result.stdout.strip(),
+                    "need_restart": True,
+                }
+            except subprocess.TimeoutExpired:
+                return {"success": False, "message": "Update timed out"}
+            except Exception as e:
+                return {"success": False, "message": str(e)}
+
+        # Binary install (DMG/EXE): download + prepare updater
+        raise HTTPException(400, "Use /api/update/download for binary installs")
+
+    @app.get("/api/update/download")
+    async def api_update_download(request: Request):
+        """Download and install update for binary installs (DMG/EXE). SSE stream."""
+        import urllib.request, ssl, tempfile, threading
+
+        settings = load_settings()
+        DEFAULT_UPDATE_URL = "https://raw.githubusercontent.com/PenguinMiaou/kbase/main/version.json"
+        update_url = settings.get("update_url", DEFAULT_UPDATE_URL).strip() or DEFAULT_UPDATE_URL
+
+        def stream():
+            try:
+                # 1. Fetch version info
+                yield f"data: {json.dumps({'stage': 'checking', 'message': 'Checking for updates...'})}\n\n"
+                ctx = ssl.create_default_context()
+                try:
+                    import certifi
+                    ctx.load_verify_locations(certifi.where())
+                except ImportError:
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                req = urllib.request.Request(update_url, headers={"User-Agent": "KBase"})
+                with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
+                    data = json.loads(resp.read().decode())
+
+                is_mac = platform.system() == "Darwin"
+                download_url = data.get("download_url_mac" if is_mac else "download_url_win", "")
+                if not download_url:
+                    download_url = data.get("download_url", "")
+                if not download_url:
+                    yield f"data: {json.dumps({'stage': 'error', 'message': 'No download URL in version manifest'})}\n\n"
+                    return
+
+                latest = data.get("version", "unknown")
+                yield f"data: {json.dumps({'stage': 'downloading', 'message': f'Downloading v{latest}...', 'version': latest})}\n\n"
+
+                # 2. Download the asset
+                req2 = urllib.request.Request(download_url, headers={"User-Agent": "KBase"})
+                with urllib.request.urlopen(req2, timeout=300, context=ctx) as resp2:
+                    total = int(resp2.headers.get('Content-Length', 0))
+                    ext = ".dmg" if is_mac else ".zip"
+                    tmp_path = os.path.join(tempfile.gettempdir(), f"kbase-update{ext}")
+                    downloaded = 0
+                    with open(tmp_path, 'wb') as f:
+                        while True:
+                            chunk = resp2.read(1024 * 256)  # 256KB chunks
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if total > 0:
+                                pct = int(downloaded * 100 / total)
+                                mb = downloaded / (1024 * 1024)
+                                total_mb = total / (1024 * 1024)
+                                yield f"data: {json.dumps({'stage': 'downloading', 'progress': pct, 'downloaded_mb': round(mb, 1), 'total_mb': round(total_mb, 1)})}\n\n"
+
+                yield f"data: {json.dumps({'stage': 'downloaded', 'message': 'Download complete. Ready to install.', 'path': tmp_path})}\n\n"
+
+            except Exception as e:
+                yield f"data: {json.dumps({'stage': 'error', 'message': str(e)})}\n\n"
+
+        return StreamingResponse(stream(), media_type="text/event-stream")
+
+    @app.post("/api/update/install")
+    async def api_update_install():
+        """Install downloaded update and restart."""
+        import tempfile, threading
+        is_mac = platform.system() == "Darwin"
+        is_win = platform.system() == "Windows"
+        ext = ".dmg" if is_mac else ".zip"
+        tmp_path = os.path.join(tempfile.gettempdir(), f"kbase-update{ext}")
+
+        if not os.path.exists(tmp_path):
+            raise HTTPException(400, "No downloaded update found. Run download first.")
+
+        if is_mac:
+            # macOS: mount DMG, copy .app, unmount, restart
+            updater_script = os.path.join(tempfile.gettempdir(), "kbase-updater.sh")
+            with open(updater_script, 'w') as f:
+                f.write(f"""#!/bin/bash
+sleep 2
+hdiutil attach "{tmp_path}" -nobrowse -quiet
+VOL=$(ls /Volumes/ | grep KBase | head -1)
+if [ -n "$VOL" ]; then
+    rm -rf /Applications/KBase.app
+    cp -R "/Volumes/$VOL/KBase.app" /Applications/
+    hdiutil detach "/Volumes/$VOL" -quiet
+fi
+rm -f "{tmp_path}"
+open /Applications/KBase.app
+rm -f "{updater_script}"
+""")
+            os.chmod(updater_script, 0o755)
+            subprocess.Popen(["/bin/bash", updater_script])
+
+        elif is_win:
+            # Windows: extract ZIP, replace files, restart
+            import zipfile
+            app_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(__file__)
+            extract_dir = os.path.join(tempfile.gettempdir(), "kbase-update-extract")
+            updater_script = os.path.join(tempfile.gettempdir(), "kbase-updater.bat")
+            with open(updater_script, 'w') as f:
+                f.write(f"""@echo off
+timeout /t 3 /nobreak >nul
+xcopy /s /e /y "{extract_dir}\\*" "{app_dir}\\" >nul 2>&1
+rmdir /s /q "{extract_dir}" >nul 2>&1
+del "{tmp_path}" >nul 2>&1
+start "" "{os.path.join(app_dir, 'KBase.exe')}"
+del "%~f0" >nul 2>&1
+""")
+            # Pre-extract ZIP
+            with zipfile.ZipFile(tmp_path, 'r') as zf:
+                zf.extractall(extract_dir)
+            subprocess.Popen(["cmd", "/c", updater_script],
+                             creationflags=0x00000008)  # DETACHED_PROCESS
+
+        else:
+            raise HTTPException(400, "Auto-install not supported on this platform")
+
+        # Shutdown after launching updater
+        def _do_shutdown():
+            time.sleep(1)
+            ppid = os.getppid()
+            try:
+                os.kill(ppid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+            os.kill(os.getpid(), signal.SIGKILL)
+        threading.Thread(target=_do_shutdown, daemon=True).start()
+        return {"success": True, "message": "Installing update... KBase will restart."}
 
     # ---- Glossary API ----
 

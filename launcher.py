@@ -1,10 +1,14 @@
-"""KBase macOS App Launcher — starts web server, shows in Dock, opens browser."""
+"""KBase Cross-Platform App Launcher — starts web server, opens browser, keeps alive."""
 import multiprocessing
 import os
+import platform
 import sys
 import time
 import webbrowser
 import signal
+
+IS_WINDOWS = platform.system() == "Windows"
+IS_MACOS = platform.system() == "Darwin"
 
 # Fix for PyInstaller bundled app
 if getattr(sys, 'frozen', False):
@@ -51,26 +55,132 @@ def check_existing_instance(port=8765):
         return "zombie"  # Port occupied but not responding
 
 
-def main():
-    status = check_existing_instance()
-    if status == "healthy":
-        # Already running — use subprocess to open browser (avoids app launch/exit bounce)
-        import subprocess
-        subprocess.Popen(["open", "http://127.0.0.1:8765/"])
-        time.sleep(1)  # Brief pause so macOS doesn't see instant exit as crash
-        os._exit(0)
-    elif status == "zombie":
-        # Kill zombie process holding the port
-        import subprocess
-        subprocess.run(["lsof", "-ti:8765"], capture_output=True)
-        result = subprocess.run(["lsof", "-ti:8765"], capture_output=True, text=True)
+def kill_zombie(port=8765):
+    """Kill zombie process holding the port (cross-platform)."""
+    import subprocess
+    if IS_WINDOWS:
+        # Use netstat to find PID on Windows
+        result = subprocess.run(
+            ["netstat", "-ano"], capture_output=True, text=True
+        )
+        for line in result.stdout.splitlines():
+            if f":{port}" in line and "LISTENING" in line:
+                parts = line.strip().split()
+                pid = parts[-1]
+                try:
+                    subprocess.run(["taskkill", "/F", "/PID", pid],
+                                   capture_output=True, timeout=5)
+                except Exception:
+                    pass
+    else:
+        # macOS/Linux: lsof
+        result = subprocess.run(["lsof", f"-ti:{port}"], capture_output=True, text=True)
         for pid in result.stdout.strip().split("\n"):
             if pid.strip():
                 try:
                     os.kill(int(pid.strip()), 9)
                 except (ValueError, ProcessLookupError):
                     pass
-        time.sleep(1)
+    time.sleep(1)
+
+
+def open_existing_browser():
+    """Open browser for existing healthy instance (cross-platform)."""
+    if IS_MACOS:
+        import subprocess
+        subprocess.Popen(["open", "http://127.0.0.1:8765/"])
+    else:
+        webbrowser.open("http://127.0.0.1:8765/")
+    time.sleep(1)
+    os._exit(0)
+
+
+def keep_alive_macos():
+    """Keep app alive with macOS native menu bar icon."""
+    try:
+        import objc
+        from Foundation import NSObject
+        from AppKit import NSApplication, NSApp, NSMenu, NSMenuItem, NSStatusBar
+
+        app = NSApplication.sharedApplication()
+        app.setActivationPolicy_(1)  # NSApplicationActivationPolicyAccessory
+
+        status_bar = NSStatusBar.systemStatusBar()
+        status_item = status_bar.statusItemWithLength_(-1)
+        status_item.setTitle_("KB")
+
+        menu = NSMenu.new()
+        menu.addItemWithTitle_action_keyEquivalent_("Open KBase in Browser", "openBrowser:", "")
+        menu.addItem_(NSMenuItem.separatorItem())
+        menu.addItemWithTitle_action_keyEquivalent_("Quit KBase", "terminate:", "q")
+        status_item.setMenu_(menu)
+
+        class AppDelegate(NSObject):
+            def openBrowser_(self, sender):
+                webbrowser.open("http://127.0.0.1:8765/")
+
+        delegate = AppDelegate.new()
+        app.setDelegate_(delegate)
+        app.run()
+    except ImportError:
+        keep_alive_generic()
+
+
+def keep_alive_windows():
+    """Keep app alive on Windows with system tray icon (or simple loop)."""
+    try:
+        import pystray
+        from PIL import Image
+
+        # Create a simple tray icon
+        def create_icon():
+            img = Image.new('RGB', (64, 64), color=(30, 60, 180))
+            try:
+                from PIL import ImageDraw, ImageFont
+                draw = ImageDraw.Draw(img)
+                draw.text((18, 10), "K", fill=(255, 255, 255))
+            except Exception:
+                pass
+            return img
+
+        def on_open(icon, item):
+            webbrowser.open("http://127.0.0.1:8765/")
+
+        def on_quit(icon, item):
+            icon.stop()
+
+        icon = pystray.Icon(
+            "KBase",
+            create_icon(),
+            "KBase",
+            menu=pystray.Menu(
+                pystray.MenuItem("Open in Browser", on_open, default=True),
+                pystray.MenuItem("Quit", on_quit),
+            )
+        )
+        icon.run()
+    except ImportError:
+        keep_alive_generic()
+
+
+def keep_alive_generic():
+    """Fallback keep-alive loop for any platform."""
+    try:
+        print("[KBase] Server running at http://127.0.0.1:8765 (Ctrl+C to quit)")
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+        signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
+        while True:
+            time.sleep(1)
+    except (KeyboardInterrupt, SystemExit):
+        pass
+
+
+def main():
+    status = check_existing_instance()
+    if status == "healthy":
+        open_existing_browser()
+    elif status == "zombie":
+        kill_zombie()
 
     # Start server in a subprocess
     server_proc = multiprocessing.Process(target=start_server, daemon=True)
@@ -79,48 +189,13 @@ def main():
     # Open browser
     open_browser()
 
-    # Keep app alive and visible in Dock using native macOS API
     try:
-        import objc
-        from Foundation import NSObject
-        from AppKit import NSApplication, NSApp, NSMenu, NSMenuItem, NSStatusBar
-
-        app = NSApplication.sharedApplication()
-        # Accessory mode: shows in menu bar, not in Dock (avoids bouncing icon issue)
-        app.setActivationPolicy_(1)  # NSApplicationActivationPolicyAccessory = 1
-
-        # Create status bar item (menu bar icon)
-        status_bar = NSStatusBar.systemStatusBar()
-        status_item = status_bar.statusItemWithLength_(-1)  # NSVariableStatusItemLength
-        status_item.setTitle_("KB")
-
-        # Status bar menu
-        menu = NSMenu.new()
-        menu.addItemWithTitle_action_keyEquivalent_("Open KBase in Browser", "openBrowser:", "")
-        menu.addItem_(NSMenuItem.separatorItem())
-        menu.addItemWithTitle_action_keyEquivalent_("Quit KBase", "terminate:", "q")
-        status_item.setMenu_(menu)
-
-        # Delegate
-        class AppDelegate(NSObject):
-            def openBrowser_(self, sender):
-                webbrowser.open("http://127.0.0.1:8765/")
-
-        delegate = AppDelegate.new()
-        app.setDelegate_(delegate)
-        app.run()
-
-    except ImportError:
-        # PyObjC not available — fallback to signal.pause()
-        try:
-            print("[KBase] Server running at http://127.0.0.1:8765 (Ctrl+C to quit)")
-            signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-            signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
-            while True:
-                time.sleep(1)
-        except (KeyboardInterrupt, SystemExit):
-            pass
-
+        if IS_MACOS:
+            keep_alive_macos()
+        elif IS_WINDOWS:
+            keep_alive_windows()
+        else:
+            keep_alive_generic()
     finally:
         server_proc.terminate()
         server_proc.join(timeout=3)

@@ -360,14 +360,39 @@
           <div class="update-actions">
             <button class="btn-outline" onclick="checkUpdate()">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
-              Check for Updates
+              <span data-i18n="checkUpdate">Check for Updates</span>
             </button>
             <button id="btn-apply-update" class="btn-accent" onclick="applyUpdate()" style="display:none;">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
-              Update Now
+              <span data-i18n="updateNow">Update Now</span>
             </button>
           </div>
+          <div id="update-progress" style="display:none;margin-top:8px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+              <span id="update-progress-text" style="font-size:12px;color:var(--text-dim);"></span>
+            </div>
+            <div style="width:100%;height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
+              <div id="update-progress-bar" style="width:0%;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-dark));border-radius:3px;transition:width 0.3s ease;"></div>
+            </div>
+          </div>
           <div id="update-status" class="update-status"></div>
+        </div>
+
+        <!-- Feedback Section -->
+        <div class="update-section" style="margin-top:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <h3 data-i18n="feedback">Feedback</h3>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px;">
+            <a href="https://github.com/PenguinMiaou/kbase/issues" target="_blank" rel="noopener" class="btn-outline" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+              <span data-i18n="reportIssue">Report an Issue</span>
+            </a>
+            <a href="https://github.com/PenguinMiaou/kbase" target="_blank" rel="noopener" class="btn-outline" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22"/></svg>
+              <span>GitHub</span>
+            </a>
+          </div>
         </div>
 
         <button class="btn-save-settings" onclick="saveAllSettings()">Save Settings</button>

@@ -9,3 +9,5 @@ build/
 dist/
 *.dmg
 *.spec
+!kbase.spec
+!kbase_win.spec
