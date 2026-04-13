@@ -291,7 +291,7 @@
         <!-- Two column: Add Directory + Upload -->
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
           <!-- Add directory -->
-          <div class="ingest-card" style="min-height:220px;">
+          <div class="ingest-card">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
               <div style="width:32px;height:32px;border-radius:8px;background:var(--accent-light);display:flex;align-items:center;justify-content:center;">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/><path d="M12 11v6M9 14h6"/></svg>
@@ -313,7 +313,6 @@
               </button>
               <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);white-space:nowrap;cursor:pointer;"><input type="checkbox" id="ingest-force" style="accent-color:var(--accent);"> Force re-index</label>
             </div>
-            <div id="ingest-result" style="margin-top:10px;min-height:90px;"></div>
           </div>
 
           <!-- Upload files -->
@@ -340,6 +339,9 @@
             <div id="upload-result" style="margin-top:8px;"></div>
           </div>
         </div>
+
+        <!-- Ingest progress (outside card to prevent jitter) -->
+        <div id="ingest-result"></div>
 
         <!-- Supported formats -->
         <div class="formats-bar">
