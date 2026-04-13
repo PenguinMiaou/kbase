@@ -650,6 +650,58 @@ Question: {question}"""
         except Exception as e:
             return {"success": False, "message": str(e)}
 
+    # ---- Glossary API ----
+
+    @app.get("/api/glossary")
+    def api_get_glossary():
+        from kbase.enhance import get_glossary
+        return get_glossary()
+
+    @app.post("/api/glossary")
+    async def api_add_glossary(request: Request):
+        body = await request.json()
+        term = body.get("term", "").strip()
+        synonyms = body.get("synonyms", [])
+        if not term:
+            raise HTTPException(400, "term is required")
+        from kbase.enhance import add_glossary_term
+        add_glossary_term(term, synonyms)
+        return {"status": "added", "term": term}
+
+    @app.delete("/api/glossary/{term}")
+    def api_delete_glossary(term: str):
+        from kbase.enhance import remove_glossary_term
+        remove_glossary_term(term)
+        return {"status": "removed", "term": term}
+
+    @app.post("/api/glossary/extract")
+    async def api_extract_glossary(request: Request):
+        """Auto-extract glossary from indexed documents using LLM."""
+        from kbase.enhance import auto_build_glossary
+        from kbase.chat import _call_llm, LLM_PROVIDERS
+        settings_data = load_settings(workspace)
+        provider_key = settings_data.get("llm_provider", "claude-sonnet")
+        provider = LLM_PROVIDERS.get(provider_key, LLM_PROVIDERS.get("claude-sonnet"))
+
+        def llm_func(prompt):
+            return _call_llm(provider, [{"role": "user", "content": prompt}], "", settings_data)
+
+        # Get sample texts from indexed files
+        store = get_store()
+        try:
+            files = store.list_files()
+            texts = []
+            for f in files[:20]:  # Sample up to 20 files
+                chunks = store.get_file_chunks(f["file_path"]) if hasattr(store, "get_file_chunks") else []
+                if chunks:
+                    texts.append(" ".join(c.get("text", "")[:500] for c in chunks[:3]))
+            new_count = auto_build_glossary(texts, llm_func)
+            return {"status": "ok", "new_terms": new_count}
+        except Exception as e:
+            return {"status": "error", "message": str(e)[:300]}
+        finally:
+            store.close()
+
     # ---- Global Memory API ----
 
     @app.get("/api/memories")

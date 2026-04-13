@@ -301,3 +301,129 @@ def enrich_chunk_context(chunk_text: str, file_name: str, metadata: dict) -> str
 
     context_prefix = " ".join(parts)
     return f"{context_prefix}\n{chunk_text}"
+
+
+# ============================================================
+# 7. Auto-Glossary: Extract terminology from documents
+# ============================================================
+
+import json as _json
+from pathlib import Path as _Path
+
+_GLOSSARY_PATH = _Path.home() / ".kbase" / "default" / "glossary.json"
+_user_glossary = {}  # Loaded at runtime
+
+
+def load_glossary():
+    """Load user-specific glossary from disk."""
+    global _user_glossary
+    if _GLOSSARY_PATH.exists():
+        try:
+            with open(_GLOSSARY_PATH, "r", encoding="utf-8") as f:
+                _user_glossary = _json.load(f)
+        except Exception:
+            _user_glossary = {}
+    # Merge into SYNONYM_MAP for search-time use
+    SYNONYM_MAP.update(_user_glossary)
+    return _user_glossary
+
+
+def save_glossary():
+    """Save user glossary to disk."""
+    _GLOSSARY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(_GLOSSARY_PATH, "w", encoding="utf-8") as f:
+        _json.dump(_user_glossary, f, ensure_ascii=False, indent=2)
+
+
+def add_glossary_term(term: str, synonyms: list[str]):
+    """Manually add a term to the glossary."""
+    _user_glossary[term] = synonyms
+    SYNONYM_MAP[term] = synonyms
+    save_glossary()
+
+
+def remove_glossary_term(term: str):
+    """Remove a term from the glossary."""
+    _user_glossary.pop(term, None)
+    SYNONYM_MAP.pop(term, None)
+    save_glossary()
+
+
+def get_glossary() -> dict:
+    """Get the full glossary (built-in + user)."""
+    return {
+        "builtin": {k: v for k, v in SYNONYM_MAP.items() if k not in _user_glossary},
+        "user": _user_glossary,
+        "total": len(SYNONYM_MAP),
+    }
+
+
+def extract_glossary_from_text(text: str, llm_func=None) -> dict:
+    """Use LLM to extract terminology, abbreviations, and synonyms from text.
+
+    Returns dict of {term: [synonym1, synonym2, ...]}
+    """
+    if not llm_func:
+        return {}
+
+    # Take a representative sample (not the whole document)
+    sample = text[:3000]
+
+    prompt = f"""Analyze the following document excerpt and extract specialized terminology.
+For each term, provide its synonyms, abbreviations, translations (Chinese↔English), and related terms.
+
+Rules:
+- Only extract domain-specific terms (not common words)
+- Include abbreviations and their full forms (e.g., "BSS" → "业务支撑系统")
+- Include Chinese-English pairs (e.g., "数据治理" → "data governance")
+- Output ONLY valid JSON: {{"term": ["synonym1", "synonym2"]}}
+- Maximum 20 terms per extraction
+
+Document excerpt:
+{sample}
+
+JSON output:"""
+
+    try:
+        result = llm_func(prompt)
+        # Parse JSON from LLM response
+        # Find the JSON part (LLM might add explanation text)
+        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', result, re.DOTALL)
+        if json_match:
+            terms = _json.loads(json_match.group())
+            # Validate: each value should be a list of strings
+            clean = {}
+            for k, v in terms.items():
+                if isinstance(v, list) and all(isinstance(s, str) for s in v):
+                    clean[k.strip()] = [s.strip() for s in v if s.strip()]
+            return clean
+    except Exception:
+        pass
+    return {}
+
+
+def auto_build_glossary(texts: list[str], llm_func=None) -> int:
+    """Extract glossary from multiple document texts and merge into user glossary.
+
+    Call this after ingestion to auto-build the glossary.
+    Returns number of new terms added.
+    """
+    if not llm_func or not texts:
+        return 0
+
+    new_count = 0
+    for text in texts[:10]:  # Limit to 10 documents per batch
+        terms = extract_glossary_from_text(text, llm_func)
+        for term, synonyms in terms.items():
+            if term not in SYNONYM_MAP and term not in _user_glossary:
+                _user_glossary[term] = synonyms
+                SYNONYM_MAP[term] = synonyms
+                new_count += 1
+
+    if new_count > 0:
+        save_glossary()
+    return new_count
+
+
+# Load glossary on module import
+load_glossary()

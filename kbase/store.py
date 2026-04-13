@@ -72,12 +72,11 @@ def _safe_sentence_transformer(model_name: str):
         return embedding_functions.SentenceTransformerEmbeddingFunction(
             model_name=model_name
         )
-    except (ValueError, ImportError):
+    except Exception as e:
         import sys
         if getattr(sys, 'frozen', False):
-            # In DMG mode: use ChromaDB default now, install sentence_transformers in background
-            print(f"[KBase] sentence_transformers not available, using default embedding. Installing in background...")
-            _background_install_st(model_name)
+            # In DMG mode: use ChromaDB default now
+            print(f"[KBase] SentenceTransformer failed ({e}), using ChromaDB default embedding")
             return embedding_functions.DefaultEmbeddingFunction()
         raise
 
