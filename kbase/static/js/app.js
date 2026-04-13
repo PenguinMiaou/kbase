@@ -6,6 +6,46 @@ localStorage.setItem('kbase-conv-id',convId);
 let chatTurns=0, chatAbort=null, lastReport=null;
 let convTitle='', convTitleManual=false;
 
+// === Cross-Tab Sync ===
+const _tabChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('kbase-sync') : null;
+function broadcastSync(type, data){
+  if(_tabChannel) _tabChannel.postMessage({type, data, tabId: Date.now()});
+  // Fallback: localStorage event (fires in OTHER tabs automatically)
+  localStorage.setItem('kbase-sync', JSON.stringify({type, data, ts: Date.now()}));
+}
+if(_tabChannel) _tabChannel.onmessage = function(e){ _handleSync(e.data); };
+window.addEventListener('storage', function(e){
+  if(e.key === 'kbase-sync' && e.newValue){
+    try{ _handleSync(JSON.parse(e.newValue)); }catch(err){}
+  }
+});
+function _handleSync(msg){
+  if(!msg || !msg.type) return;
+  switch(msg.type){
+    case 'conv-changed':  // Conversation list changed (new/delete/rename)
+      loadConvList();
+      break;
+    case 'conv-switched': // Active conversation switched
+      if(msg.data && msg.data !== convId){
+        convId = msg.data;
+        localStorage.setItem('kbase-conv-id', convId);
+        document.getElementById('chat-messages').innerHTML = '';
+        restoreConversation();
+        loadConvList();
+      }
+      break;
+    case 'settings-saved': // Settings changed
+      loadSettings();
+      break;
+    case 'memory-changed': // Global memory updated
+      // Refresh if on settings tab
+      break;
+    case 'lang-changed':  // Language switched
+      if(msg.data) { curLang = msg.data; applyI18n(); }
+      break;
+  }
+}
+
 // === Utility ===
 async function api(url,opts){const r=await fetch(API+url,opts);return r.json();}
 function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -619,6 +659,7 @@ async function newChat(){
   updateSessionTitle('');
   switchTab('chat');
   const ci=document.getElementById('chat-input');if(ci)ci.focus();
+  broadcastSync('conv-changed');
 }
 
 async function clearChat(){
@@ -794,16 +835,17 @@ async function switchConv(id){
   document.getElementById('chat-messages').innerHTML='';
   document.getElementById('chat-welcome').style.display='none';
   convTitle='';convTitleManual=false;
-  // Switch to chat tab if not already there
   switchTab('chat');
   await restoreConversation();
   loadConvList();
+  broadcastSync('conv-switched', id);
 }
 
 async function deleteConv(id){
   await fetch(`/api/conversations/${id}`,{method:'DELETE'});
   if(id===convId)newChat();
   loadConvList();
+  broadcastSync('conv-changed');
 }
 
 function showHistory(){loadConvList();}
@@ -1399,6 +1441,7 @@ async function saveAllSettings(){
   document.getElementById('set-save-msg').innerHTML='<span class="save-ok" style="display:inline-flex;align-items:center;gap:4px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg> Settings saved!</span>';
   setTimeout(()=>document.getElementById('set-save-msg').innerHTML='',3000);
   await loadSettings();
+  broadcastSync('settings-saved');
 }
 
 // === Model Download ===
@@ -1784,7 +1827,7 @@ function applyI18n(){
 
 // Override switchLang
 const _origSwitchLang=switchLang;
-function switchLang(l){curLang=l;localStorage.setItem('kbase-ui-lang',l);applyI18n();}
+function switchLang(l){curLang=l;localStorage.setItem('kbase-ui-lang',l);applyI18n();broadcastSync('lang-changed',l);}
 
 // === Shutdown ===
 async function shutdown(){
