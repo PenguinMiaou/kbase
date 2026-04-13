@@ -54,9 +54,11 @@ def check_existing_instance(port=8765):
 def main():
     status = check_existing_instance()
     if status == "healthy":
-        # Already running, just open browser
-        webbrowser.open("http://127.0.0.1:8765/")
-        return
+        # Already running — use subprocess to open browser (avoids app launch/exit bounce)
+        import subprocess
+        subprocess.Popen(["open", "http://127.0.0.1:8765/"])
+        time.sleep(1)  # Brief pause so macOS doesn't see instant exit as crash
+        os._exit(0)
     elif status == "zombie":
         # Kill zombie process holding the port
         import subprocess
