@@ -1017,18 +1017,7 @@ async function resyncDir(path){
 }
 
 async function browseDir(){
-  // Method 1: Browser File System Access API (Chrome/Edge/Safari 15.2+)
-  if(window.showDirectoryPicker){
-    try{
-      const dirHandle=await window.showDirectoryPicker({mode:'read'});
-      // Browser returns handle, not path. We need the real path.
-      // Unfortunately showDirectoryPicker doesn't expose the full path.
-      // Fall through to method 2.
-    }catch(e){
-      if(e.name==='AbortError')return; // User cancelled
-    }
-  }
-  // Method 2: Backend native dialog (osascript on macOS)
+  // Use backend native dialog (osascript on macOS, zenity on Linux)
   try{
     const d=await api('/api/browse-dir');
     if(d.error==='permission_needed'){

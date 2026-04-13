@@ -60,6 +60,13 @@ def extract_file(file_path: str | Path) -> dict:
     if not extractor:
         return {"text": "", "tables": [], "metadata": {"type": ext, "error": "unsupported"}}
     try:
+        # Check readability first
+        if not os.access(str(p), os.R_OK):
+            return {
+                "text": "", "tables": [],
+                "metadata": {"type": ext, "file_name": p.name, "file_path": str(p),
+                             "error": "Permission denied — grant Full Disk Access in System Settings"},
+            }
         result = extractor(p)
         result.setdefault("tables", [])
         result.setdefault("metadata", {})
@@ -68,10 +75,15 @@ def extract_file(file_path: str | Path) -> dict:
         result["metadata"]["file_path"] = str(p)
         result["metadata"]["file_size"] = p.stat().st_size
         return result
+    except PermissionError:
+        return {
+            "text": "", "tables": [],
+            "metadata": {"type": ext, "file_name": p.name, "file_path": str(p),
+                         "error": "Permission denied — grant Full Disk Access in System Settings"},
+        }
     except Exception as e:
         return {
-            "text": "",
-            "tables": [],
+            "text": "", "tables": [],
             "metadata": {"type": ext, "file_name": p.name, "file_path": str(p), "error": str(e)},
         }
 
