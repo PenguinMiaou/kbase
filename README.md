@@ -7,7 +7,7 @@
 Turn any folder of documents into a searchable, AI-powered knowledge base.
 No cloud upload. No vendor lock-in. Your data stays on your machine.
 
-[Quick Start](#quick-start) | [Features](#features) | [Architecture](#architecture) | [CLI](#cli)
+[Quick Start](#quick-start) | [Features](#features) | [Knowledge Graph](#knowledge-graph) | [Architecture](#architecture) | [CLI](#cli)
 
 </div>
 
@@ -21,22 +21,22 @@ KBase indexes everything once, then lets you **search across all files in one pl
 
 ```
 "Find the Q3 revenue numbers from that finance deck"
-→ Found in 财务报告_2024Q3.xlsx (Sheet: Revenue, Row 42)
+-> Found in Revenue_Report_2024Q3.xlsx (Sheet: Revenue, Row 42)
 
 "What did the architecture team propose for the data platform?"
-→ Sources: IT架构方案v3.pptx (Slide 14), 数据平台规划.docx (Section 2.3)
+-> Sources: IT_Architecture_v3.pptx (Slide 14), Data_Platform_Plan.docx (Section 2.3)
 ```
 
 ## Features
 
-### Search That Actually Works
+### 13-Stage Adaptive Search Pipeline
 
-KBase doesn't just do keyword matching. It runs a **12-stage retrieval pipeline** that adapts based on query difficulty:
+KBase doesn't just do keyword matching. It runs a **13-stage retrieval pipeline** that adapts based on query difficulty:
 
 ```
-Query → Synonym Expand → [HyDE → Multi-Query]* → Semantic + Keyword + Filename
-→ RRF Fusion → Time Decay → Dedup → Cross-Encoder Rerank → Parent Chunk Expand
-→ Directory Priority → Table Hint Detection
+Query -> Synonym Expand -> [HyDE -> Multi-Query]* -> Semantic + Keyword + Filename
+-> RRF Fusion -> Time Decay -> Dedup -> Cross-Encoder Rerank -> Parent Chunk Expand
+-> Directory Priority -> Graph Boost -> Table Hint Detection
                                           * only when needed (adaptive)
 ```
 
@@ -45,10 +45,23 @@ Query → Synonym Expand → [HyDE → Multi-Query]* → Semantic + Keyword + Fi
 | **HyDE** | LLM generates a hypothetical answer, uses its embedding to search (matches documents better than short queries) |
 | **Multi-Query** | LLM rewrites your query from different angles for broader recall |
 | **Parent-Child Chunks** | Small chunks for precise matching, large chunks returned for richer context |
-| **Semantic Chunking** | Splits by paragraphs/sentences, not arbitrary character count |
+| **Semantic Chunking** | Splits by paragraphs/sentences (Chinese-aware), not arbitrary character count |
 | **Cross-Encoder Rerank** | BAAI/bge-reranker-v2-m3 re-scores top results for precision |
 | **Adaptive Escalation** | Simple queries stay fast (<1s). Complex queries get full pipeline (2-3s) |
 | **Auto-Glossary** | Extracts domain terminology from your docs, expands searches automatically |
+| **Graph Boost** | Manually confirmed document relationships boost search ranking |
+
+### Knowledge Graph
+
+Obsidian-style graph visualization with **Graph + Canvas dual mode**:
+
+- **Graph Mode** -- Force-directed layout (Cytoscape.js + fcose), auto-computed relationships via semantic similarity
+- **Canvas Mode** -- Drag-to-pin whiteboard, manually draw edges between documents
+- **Three-layer edges**: Auto (dashed, low opacity) / Confirmed (solid) / Labeled (solid + arrow + label)
+- Hover to highlight neighborhood, double-click for local graph (2-hop subgraph)
+- Right-click menus for nodes (open file, view local graph, pin) and edges (confirm, label, delete)
+- Search filter: type keyword to highlight matching nodes, dim the rest
+- Dark/Light theme matching Obsidian's aesthetic
 
 ### 20+ LLM Providers
 
@@ -73,8 +86,6 @@ KBase can extract images from PPTX and PDF, then describe them using Vision LLMs
 | GLM-4V Flash | Free Chinese vision |
 | Ollama (minicpm-v) | Offline, local |
 
-Architecture diagrams, flowcharts, org charts in your PPTs are no longer invisible to search.
-
 ### Multi-Engine Web Search
 
 | Engine | Type | Needs Key |
@@ -88,10 +99,11 @@ Architecture diagrams, flowcharts, org charts in your PPTs are no longer invisib
 
 Auto-routes by language: Chinese queries hit Bing CN + DuckDuckGo, English queries hit Brave + DuckDuckGo.
 
-### 4 Search Modes
+### 5 Search Modes
 
 | Mode | What it does |
 |------|-------------|
+| **Direct** | Pure LLM chat with global memory, no search |
 | **Knowledge** | Search your local indexed files only |
 | **Web** | Search the internet (multi-engine) |
 | **Hybrid** | Local KB + Web combined |
@@ -109,6 +121,7 @@ Auto-routes by language: Chinese queries hit Bing CN + DuckDuckGo, English queri
 | `.mp3` `.m4a` `.wav` `.mp4` | Speech-to-text (Whisper / DashScope / Gemini) |
 | `.eml` `.mbox` | Email parsing with MIME header decoding |
 | `.zip` `.tar` `.gz` `.7z` | Auto-extract and index contents |
+| `.rar` | RAR archive extraction (rarfile pure-Python) |
 
 ### Claude-Inspired UI
 
@@ -117,23 +130,30 @@ Auto-routes by language: Chinese queries hit Bing CN + DuckDuckGo, English queri
 - 7 buddy presets with MBTI personalities (Professional, Buddy, Analyst, Tutor, Creative, Executive, Custom)
 - Dark/Light theme + Chinese/English i18n
 - Source preview popup with keyword highlighting
-- Real-time ingest progress bar (SSE streaming)
+- Real-time ingest progress bar (SSE streaming) with pause/stop/resume
 - Cross-tab sync (BroadcastChannel)
 - Global memory system (auto-extracts key facts from conversations)
 - Drag & drop file upload
+- Knowledge Graph tab with Graph/Canvas dual mode
 
 ## Quick Start
 
 ### macOS (DMG)
 
-Download `KBase-0.3.0.dmg` from [Releases](https://github.com/PenguinMiaou/kbase/releases) → Drag to Applications → Open.
+Download `KBase-0.5.0.dmg` from [Releases](https://github.com/PenguinMiaou/kbase/releases) -> Drag to Applications -> Open.
+
+### Windows (EXE)
+
+Download `KBase-0.5.0-Windows.zip` from [Releases](https://github.com/PenguinMiaou/kbase/releases) -> Extract -> Run `KBase.exe`.
 
 ### From Source
 
 ```bash
 git clone https://github.com/PenguinMiaou/kbase.git
 cd kbase
-bash install.sh          # Creates venv, installs deps, creates kbase-cli wrapper
+bash install.sh          # macOS/Linux: creates venv + kbase-cli wrapper
+# or
+install.bat              # Windows: creates venv + kbase.bat wrapper
 
 ./kbase-cli ingest ~/Documents/work    # Index your files
 ./kbase-cli web                        # Open http://localhost:8765
@@ -173,25 +193,26 @@ kbase -f json search "query"          # JSON output for scripts
 kbase/
 ├── web.py           # FastAPI server + all API endpoints
 ├── chat.py          # 20 LLM providers + buddy presets + memory
-├── store.py         # ChromaDB (vectors) + SQLite FTS5 (keyword) + tabular
-├── search.py        # 12-stage adaptive pipeline
+├── store.py         # ChromaDB (vectors) + SQLite FTS5 (keyword) + tabular + graph tables
+├── search.py        # 13-stage adaptive pipeline (+ graph boost)
+├── graph.py         # Knowledge graph computation + edge management
 ├── enhance.py       # HyDE, multi-query, reranking, glossary, query expansion
 ├── vision.py        # Vision LLM image description (8 models)
-├── extract.py       # File extractors (PPTX/PDF/DOCX/XLSX/audio/email/archive)
+├── extract.py       # File extractors (PPTX/PDF/DOCX/XLSX/audio/email/archive/RAR)
 ├── chunk.py         # Semantic chunking + parent-child hierarchy
-├── ingest.py        # Ingestion pipeline with resume-from-checkpoint
+├── ingest.py        # Ingestion pipeline with pause/stop/resume
 ├── websearch.py     # 6-engine web search with language routing
 ├── agent_loop.py    # Deep research agent (multi-round)
 ├── config.py        # Models config (embedding/whisper/vision/language)
 ├── connectors/      # Feishu/Lark integration
-└── static/          # Claude-style frontend (HTML/CSS/JS)
+└── static/          # Claude-style frontend (HTML/CSS/JS + Cytoscape.js graph)
 ```
 
 ### Storage
 
 ```
 ~/.kbase/default/
-├── metadata.db          # SQLite: file index, FTS5 chunks, tabular data
+├── metadata.db          # SQLite: file index, FTS5 chunks, tabular data, graph edges
 ├── chroma/              # ChromaDB vector database
 ├── settings.json        # All settings (models, API keys, preferences)
 ├── conversations.json   # Chat history with sources
@@ -202,27 +223,34 @@ kbase/
 
 ## Scalability
 
-Tested with 300GB+ document collections:
+Tested with 300GB+ document collections (800+ files, 26K+ chunks):
 - SQLite indexes on all lookup columns
-- Large file guard (>200MB skip)
+- Large file support (up to 500MB per file)
 - Deep directory support (15 levels)
-- Incremental ingest = natural resume-from-checkpoint
+- Incremental ingest with pause/stop/resume
 - Adaptive search: simple queries stay fast, complex queries escalate
+- Per-file result aggregation (max 3 chunks/file for diversity)
 
 ## Auto-Update
 
 KBase checks for updates from a configurable URL (default: this repo's `version.json`).
-Settings → Update → Check for Updates.
 
-For source installs: one-click `git pull` + pip install.
-For DMG installs: download link to latest release.
+- **Source installs**: One-click `git pull` + pip install from Settings
+- **DMG/EXE installs**: One-click download + auto-install + restart from Settings
+- **GitHub Actions CI**: Push a `v*` tag to auto-build DMG + Windows EXE
+
+## Feedback
+
+Found a bug? Have a feature request?
+- [Open an Issue](https://github.com/PenguinMiaou/kbase/issues)
+- Settings -> Feedback -> Report an Issue
 
 ## Contributing
 
 ```bash
 git clone https://github.com/PenguinMiaou/kbase.git
 cd kbase && pip install -e .
-python -m kbase.web     # Dev server at :8765
+python -m kbase.cli web    # Dev server at :8765
 ```
 
 ## License
