@@ -1107,7 +1107,7 @@ async function loadSettingsPanel(){
 
   // Update URL
   const updEl=document.getElementById('set-update-url');
-  if(updEl)updEl.value=s.update_url||'';
+  if(updEl)updEl.value=s.update_url||'https://raw.githubusercontent.com/PenguinMiaou/kbase/main/version.json';
 
   // Load model download status
   loadModelStatus();

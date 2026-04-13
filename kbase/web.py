@@ -581,11 +581,10 @@ Question: {question}"""
         from kbase import __version__
         import urllib.request
         settings = load_settings()
-        update_url = settings.get("update_url", "").strip()
+        DEFAULT_UPDATE_URL = "https://raw.githubusercontent.com/PenguinMiaou/kbase/main/version.json"
+        update_url = settings.get("update_url", DEFAULT_UPDATE_URL).strip()
         if not update_url:
-            # Default: check a version.json from a configurable URL
-            return {"update_available": False, "current": __version__,
-                    "message": "Set update_url in Settings to enable auto-update"}
+            update_url = DEFAULT_UPDATE_URL
         try:
             import ssl
             ctx = ssl.create_default_context()
