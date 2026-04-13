@@ -37,7 +37,19 @@ def open_browser():
             time.sleep(0.5)
 
 
+def is_port_in_use(port=8765):
+    """Check if KBase is already running."""
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(('127.0.0.1', port)) == 0
+
+
 def main():
+    # If already running, just open browser and exit
+    if is_port_in_use():
+        webbrowser.open("http://127.0.0.1:8765/")
+        return
+
     # Start server in a subprocess
     server_proc = multiprocessing.Process(target=start_server, daemon=True)
     server_proc.start()
