@@ -1181,7 +1181,9 @@ async function loadSettingsPanel(){
       </div>
     </div>`;
   }).join('');
-  // Show custom prompt input if custom is selected
+  // Show/hide custom prompt input
+  const existingBox=document.getElementById('custom-buddy-box');
+  if(existingBox)existingBox.remove();
   if(curBuddy==='custom')showCustomBuddyPrompt();
   // Values
   document.getElementById('set-chunk-max').value=s.chunk_max_chars||1500;
