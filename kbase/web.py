@@ -179,6 +179,24 @@ def create_app(workspace: str = "default") -> FastAPI:
         finally:
             store.close()
 
+    @app.post("/api/ingest/pause")
+    def api_ingest_pause():
+        from kbase.ingest import pause_ingest
+        pause_ingest()
+        return {"status": "toggled"}
+
+    @app.post("/api/ingest/stop")
+    def api_ingest_stop():
+        from kbase.ingest import stop_ingest
+        stop_ingest()
+        return {"status": "stopped"}
+
+    @app.post("/api/ingest/resume")
+    def api_ingest_resume():
+        from kbase.ingest import resume_ingest
+        resume_ingest()
+        return {"status": "resumed"}
+
     @app.get("/api/ingest-stream")
     def api_ingest_stream(directory: str = Query(...), force: bool = Query(False)):
         """SSE endpoint for real-time ingest progress."""

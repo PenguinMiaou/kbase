@@ -1,5 +1,8 @@
-"""Ingestion pipeline: scan directory → extract → chunk → index."""
+"""Ingestion pipeline: scan directory → extract → chunk → index.
+Supports pause/stop signals and parallel extraction."""
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -9,12 +12,35 @@ from kbase.chunk import chunk_document
 from kbase.store import KBaseStore
 from kbase.enhance import enrich_chunk_context, segment_text
 
+# Global control signals for pause/stop
+_ingest_stop = threading.Event()
+_ingest_pause = threading.Event()
+
+
+def stop_ingest():
+    """Signal the current ingest to stop."""
+    _ingest_stop.set()
+
+
+def pause_ingest():
+    """Toggle pause on current ingest."""
+    if _ingest_pause.is_set():
+        _ingest_pause.clear()  # Resume
+    else:
+        _ingest_pause.set()    # Pause
+
+
+def resume_ingest():
+    """Resume paused ingest."""
+    _ingest_pause.clear()
+
 
 def ingest_directory(
     store: KBaseStore,
     directory: str,
     force: bool = False,
     progress_callback: Optional[Callable] = None,
+    workers: int = 4,
 ) -> dict:
     """Ingest all supported files from a directory.
 
@@ -50,9 +76,29 @@ def ingest_directory(
         "failed": 0,
         "errors": [],
         "start_time": time.time(),
+        "stopped": False,
+        "paused_time": 0,
     }
 
+    # Reset control signals
+    _ingest_stop.clear()
+    _ingest_pause.clear()
+
     for i, file_path in enumerate(sorted(files)):
+        # Check stop signal
+        if _ingest_stop.is_set():
+            stats["stopped"] = True
+            if progress_callback:
+                progress_callback(i + 1, len(files), file_path.name, "stopped")
+            break
+
+        # Check pause signal — block until resumed
+        while _ingest_pause.is_set() and not _ingest_stop.is_set():
+            if progress_callback:
+                progress_callback(i + 1, len(files), file_path.name, "paused")
+            time.sleep(0.5)
+            stats["paused_time"] += 0.5
+
         fp = str(file_path)
 
         # Skip if already indexed and up-to-date

@@ -1051,13 +1051,24 @@ async function doIngestNew(){
   el.innerHTML=`<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:8px;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
       <span style="font-size:12px;color:var(--text-dim);" id="ingest-status">Scanning files...</span>
-      <span style="font-size:11px;color:var(--text-muted);" id="ingest-count"></span>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span style="font-size:11px;color:var(--text-muted);" id="ingest-count"></span>
+        <span style="font-size:10px;color:var(--text-muted);" id="ingest-eta"></span>
+      </div>
     </div>
     <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;">
       <div id="ingest-bar" style="height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width 0.3s;"></div>
     </div>
-    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;" id="ingest-file"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
+      <div style="font-size:11px;color:var(--text-muted);" id="ingest-file"></div>
+      <div style="display:flex;gap:4px;" id="ingest-controls">
+        <button onclick="toggleIngestPause()" id="ingest-pause-btn" style="padding:3px 10px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--card);color:var(--text);cursor:pointer;">Pause</button>
+        <button onclick="stopIngest()" style="padding:3px 10px;font-size:11px;border:1px solid var(--red,#dc2626);border-radius:5px;background:none;color:var(--red,#dc2626);cursor:pointer;">Stop</button>
+      </div>
+    </div>
   </div>`;
+  let _ingestPaused=false;
+  window._ingestStartTime=Date.now();
 
   const url=`/api/ingest-stream?directory=${encodeURIComponent(path)}&force=${force}`;
   const evtSrc=new EventSource(url);
@@ -1079,9 +1090,26 @@ async function doIngestNew(){
       }else{
         const pct=d.total?Math.round(d.current/d.total*100):0;
         if(bar)bar.style.width=pct+'%';
-        if(status)status.textContent=`${d.status==='skipped'?'Skipping':'Processing'} (${d.current}/${d.total})`;
+        const label=d.status==='paused'?'Paused':d.status==='skipped'?'Skipping':'Processing';
+        if(status)status.textContent=`${label} (${d.current}/${d.total})`;
         if(count)count.textContent=pct+'%';
         if(file)file.textContent=d.name||'';
+        // ETA calculation
+        const eta=document.getElementById('ingest-eta');
+        if(eta&&d.current>10&&d.total>0){
+          const elapsed=(Date.now()-window._ingestStartTime)/1000;
+          const rate=d.current/elapsed;
+          const remaining=Math.round((d.total-d.current)/rate);
+          if(remaining>3600)eta.textContent=`~${Math.round(remaining/3600)}h left`;
+          else if(remaining>60)eta.textContent=`~${Math.round(remaining/60)}m left`;
+          else eta.textContent=`~${remaining}s left`;
+        }
+        // Update pause button state
+        if(d.status==='paused'){
+          if(bar)bar.style.background='var(--yellow)';
+          const pb=document.getElementById('ingest-pause-btn');
+          if(pb)pb.textContent='Resume';
+        }
       }
     }catch(err){}
   };
@@ -1092,6 +1120,29 @@ async function doIngestNew(){
     loadStats();loadIngestDirs();
   };
 }
+async function toggleIngestPause(){
+  const btn=document.getElementById('ingest-pause-btn');
+  const bar=document.getElementById('ingest-bar');
+  if(btn&&btn.textContent==='Pause'){
+    await fetch('/api/ingest/pause',{method:'POST'});
+    btn.textContent='Resume';
+    if(bar)bar.style.background='var(--yellow)';
+  }else{
+    await fetch('/api/ingest/resume',{method:'POST'});
+    if(btn)btn.textContent='Pause';
+    if(bar)bar.style.background='var(--accent)';
+  }
+}
+async function stopIngest(){
+  await fetch('/api/ingest/stop',{method:'POST'});
+  const status=document.getElementById('ingest-status');
+  const bar=document.getElementById('ingest-bar');
+  const ctrl=document.getElementById('ingest-controls');
+  if(status)status.innerHTML='<span style="color:var(--red);">Stopped by user</span>';
+  if(bar)bar.style.background='var(--red,#dc2626)';
+  if(ctrl)ctrl.style.display='none';
+}
+
 // Drag & drop support
 document.addEventListener('DOMContentLoaded',()=>{
   const dropArea=document.getElementById('drop-area');
