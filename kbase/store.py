@@ -149,6 +149,65 @@ class KBaseStore:
             metadata={"hnsw:space": "cosine"},
         )
 
+        # Dimension mismatch detection: if user switched embedding model,
+        # the existing ChromaDB collection has wrong dimensions.
+        # Auto-delete and recreate to prevent cryptic errors.
+        self._check_embedding_dimension(chroma_path)
+
+    def _check_embedding_dimension(self, chroma_path):
+        """Detect embedding dimension mismatch when user switches model.
+
+        If the existing ChromaDB collection was built with a different dimension,
+        delete it and recreate so re-ingest works cleanly.
+        """
+        try:
+            count = self.collection.count()
+            if count == 0:
+                return  # Empty collection, nothing to check
+
+            # Sample one embedding to get stored dimension
+            sample = self.collection.peek(limit=1)
+            if not sample or not sample.get("embeddings") or len(sample["embeddings"]) == 0:
+                return
+
+            stored_dim = len(sample["embeddings"][0])
+
+            # Get expected dimension from current model
+            model_info = EMBEDDING_MODELS.get(self.embedding_model, {})
+            expected_dim = model_info.get("dim", 0)
+
+            # If model doesn't declare dim, probe it
+            if expected_dim == 0:
+                try:
+                    test_emb = self.ef(["test"])
+                    if test_emb and len(test_emb) > 0:
+                        expected_dim = len(test_emb[0])
+                except Exception:
+                    return  # Can't determine, skip check
+
+            if expected_dim > 0 and stored_dim != expected_dim:
+                print(f"[KBase] Embedding dimension mismatch: collection has {stored_dim}d, "
+                      f"model '{self.embedding_model}' expects {expected_dim}d. "
+                      f"Rebuilding ChromaDB collection...")
+
+                # Delete and recreate collection
+                self.chroma_client.delete_collection("documents")
+                self.collection = self.chroma_client.get_or_create_collection(
+                    name="documents",
+                    embedding_function=self.ef,
+                    metadata={"hnsw:space": "cosine"},
+                )
+
+                # Reset chunk counts in SQLite (data needs re-ingest)
+                c = self.conn.cursor()
+                c.execute("UPDATE files SET chunk_count = 0")
+                c.execute("DELETE FROM fts_chunks")
+                self.conn.commit()
+
+                print(f"[KBase] ChromaDB rebuilt. Please re-ingest your files.")
+        except Exception as e:
+            print(f"[KBase] Dimension check skipped: {e}")
+
     def _init_sqlite(self):
         c = self.conn.cursor()
         # File metadata
