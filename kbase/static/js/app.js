@@ -1121,9 +1121,22 @@ async function loadSettingsPanel(){
   const lang=d.language_profiles||{};
   renderLangGrid(lang,s.language||'zh-en');
   // Buddy
-  document.getElementById('set-buddy-grid').innerHTML=Object.entries(bp).map(([k,b])=>
-    `<div class="mode-btn ${k===(s.buddy_preset||'buddy')?'active':''}" data-mode="${k}" onclick="pickSet(this,'buddy','${k}')" style="padding:8px;justify-content:center;">${b.name}</div>`
-  ).join('');
+  const curBuddy=s.buddy_preset||'buddy';
+  document.getElementById('set-buddy-grid').innerHTML=Object.entries(bp).map(([k,b])=>{
+    const isActive=k===curBuddy;
+    const name=curLang==='zh'?(b.name_zh||b.name):b.name;
+    const desc=curLang==='zh'?(b.desc_zh||b.desc):b.desc;
+    const mbti=b.mbti?`<span style="font-size:9px;padding:1px 4px;border-radius:3px;background:var(--accent-light);color:var(--accent);font-weight:500;">${b.mbti}</span>`:'';
+    return `<div class="mode-btn ${isActive?'active':''}" data-mode="${k}" onclick="pickSet(this,'buddy','${k}')${k==='custom'?';showCustomBuddyPrompt()':''}" style="padding:10px;flex-direction:column;align-items:flex-start;gap:4px;">
+      <div style="display:flex;align-items:center;gap:6px;width:100%;">
+        <span style="font-size:13px;font-weight:500;">${name}</span>
+        ${mbti}
+      </div>
+      <div style="font-size:10px;color:var(--text-muted);line-height:1.3;">${desc}</div>
+    </div>`;
+  }).join('');
+  // Show custom prompt input if custom is selected
+  if(curBuddy==='custom')showCustomBuddyPrompt();
   // Values
   document.getElementById('set-chunk-max').value=s.chunk_max_chars||1500;
   document.getElementById('set-chunk-overlap').value=s.chunk_overlap_chars||200;
@@ -1366,6 +1379,8 @@ async function saveAllSettings(){
   s.time_decay=document.getElementById('set-time-decay').checked;
   const updUrl=document.getElementById('set-update-url');
   if(updUrl&&updUrl.value)s.update_url=updUrl.value;
+  const cbp=document.getElementById('custom-buddy-prompt');
+  if(cbp)s.custom_buddy_prompt=cbp.value;
   // Collect API keys and URLs
   document.querySelectorAll('.apikey-input').forEach(inp=>{
     const key=inp.dataset.key;
@@ -1418,6 +1433,20 @@ function downloadModel(modelName, btnId, barId, msgId){
     if(btn){btn.textContent='Retry';btn.disabled=false;}
     if(msg)msg.textContent='Connection lost. Try again.';
   };
+}
+
+// === Custom Buddy ===
+function showCustomBuddyPrompt(){
+  const grid=document.getElementById('set-buddy-grid');
+  if(!grid)return;
+  let box=document.getElementById('custom-buddy-box');
+  if(box)return; // Already showing
+  const s=_setData?_setData.settings:{};
+  const html=`<div id="custom-buddy-box" style="grid-column:1/-1;margin-top:8px;padding:12px;border:1px solid var(--accent);border-radius:8px;background:var(--accent-light);">
+    <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px;">${curLang==='zh'?'自定义人格提示词':'Custom personality prompt'}</label>
+    <textarea id="custom-buddy-prompt" rows="3" placeholder="${curLang==='zh'?'描述你想要的 AI 人格和行为方式...':'Describe the AI personality and behavior you want...'}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:12px;outline:none;resize:vertical;font-family:inherit;">${esc(s.custom_buddy_prompt||'')}</textarea>
+  </div>`;
+  grid.insertAdjacentHTML('beforeend',html);
 }
 
 // === Auto-Update ===
