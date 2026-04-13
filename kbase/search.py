@@ -207,15 +207,13 @@ def _apply_directory_priority(results: list) -> list:
     - Files in active project directories get boosted
     - Duplicate files across directories: prefer non-archive version
     """
-    # Penalty patterns (Chinese and English)
+    # Penalty patterns — universal archive/deprecated indicators
     PENALTY_PATTERNS = [
-        "归档", "历史档", "历史", "archive", "archived", "backup", "old",
-        "废弃", "作废", "旧版", "deprecated", "40_归档",
+        "归档", "历史", "archive", "archived", "backup", "old",
+        "废弃", "作废", "旧版", "deprecated", "trash", "deleted",
     ]
-    # Boost patterns
-    BOOST_PATTERNS = [
-        "10_项目", "20_领域", "00 CMHK工作日志",
-    ]
+    # No hardcoded boost patterns — use recency (time_decay) instead.
+    # Active directories are boosted by having newer files, not by name.
 
     for r in results:
         meta = r.get("metadata", {})
@@ -228,12 +226,6 @@ def _apply_directory_priority(results: list) -> list:
         for pattern in PENALTY_PATTERNS:
             if pattern.lower() in fpath:
                 multiplier *= 0.6  # 40% penalty
-                break
-
-        # Boost for active directories
-        for pattern in BOOST_PATTERNS:
-            if pattern.lower() in fpath:
-                multiplier *= 1.2  # 20% boost
                 break
 
         # Apply multiplier to score

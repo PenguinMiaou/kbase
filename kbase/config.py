@@ -183,7 +183,7 @@ LANGUAGE_PROFILES = {
         "segmenter": "jieba",
         "recommended_embedding": "bge-m3",
         "synonym_expansion": True,
-        "notes": "Best for CMHK-style docs with mixed languages",
+        "notes": "Best for Chinese-English mixed documents",
     },
     "en": {
         "name": "English",

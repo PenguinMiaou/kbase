@@ -25,12 +25,12 @@ FEISHU_GUIDE_HTML = r"""
 <div style="padding:12px; border-left:3px solid #818cf8; margin:12px 0;">
   <p><strong>1.1</strong> Open Developer Console / 打开开发者后台:</p>
   <ul style="margin:4px 0 0 16px;">
-    <li>All Feishu users (including CMHK TRY) / 所有飞书用户 (含 CMHK TRY): <a href="https://open.feishu.cn/app" target="_blank" style="color:#818cf8;">open.feishu.cn/app</a></li>
+    <li>Feishu / 飞书: <a href="https://open.feishu.cn/app" target="_blank" style="color:#818cf8;">open.feishu.cn/app</a></li>
     <li>Lark (International) / Lark 国际版: <a href="https://open.larksuite.com/app" target="_blank" style="color:#818cf8;">open.larksuite.com/app</a></li>
   </ul>
   <p style="font-size:12px; color:#64748b;">
-    Note: CMHK TRY users also use open.feishu.cn for developer console. The custom domain (cmhk-try) is only needed in KBase settings.
-    <br>注意: CMHK TRY 用户也是用 open.feishu.cn 开发者后台。自定义域名 (cmhk-try) 只在 KBase 设置里填写。
+    If your organization uses a custom Feishu domain, fill it in KBase Settings under "Custom Domain".
+    <br>如果贵组织使用自定义飞书域名，在 KBase 设置中填写。
   </p>
 </div>
 
@@ -124,7 +124,7 @@ FEISHU_GUIDE_HTML = r"""
 <div style="padding:12px; border-left:3px solid #22c55e; margin:12px 0;">
   <ol style="margin:0 0 0 16px;">
     <li>Fill in <strong>App ID</strong> and <strong>App Secret</strong> / 填入 App ID 和 App Secret</li>
-    <li>If CMHK TRY: fill Custom Domain = <code>cmhk-try</code> / CMHK TRY用户填自定义域名</li>
+    <li>If custom domain: fill Custom Domain / 如有自定义域名请填写</li>
     <li>Click <strong>"Save & Connect"</strong> / 点击保存</li>
     <li>Click <strong>"OAuth Login"</strong> / 点击授权登录 — 在弹窗中授权</li>
     <li>Click <strong>"Sync Now"</strong> / 点击立即同步 — 完成!</li>

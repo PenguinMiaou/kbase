@@ -34,7 +34,7 @@ class FeishuConnector:
         self.app_id = app_id
         self.app_secret = app_secret
         self.workspace = workspace
-        # Support custom enterprise domain (e.g. cmhk-try.feishu.cn)
+        # Support custom enterprise domain (e.g. mycompany.feishu.cn)
         if custom_domain:
             domain = custom_domain.strip().rstrip("/")
             if not domain.endswith(".feishu.cn") and "." not in domain:
