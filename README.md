@@ -135,19 +135,16 @@ Auto-routes by language: Chinese queries hit Bing CN + DuckDuckGo, English queri
 
 ### Claude-Inspired UI
 
-<details>
-<summary>More screenshots</summary>
-
-| Feature | Screenshot |
-|---------|-----------|
-| Search + PPTX Preview | <img src="docs/screenshots/search-preview.png" width="700"> |
-| Search File Type Filter | <img src="docs/screenshots/search-filter.png" width="700"> |
-| Graph Hover + Preview | <img src="docs/screenshots/graph-hover.png" width="700"> |
-| File List | <img src="docs/screenshots/file-list.png" width="700"> |
-| Ingest Progress | <img src="docs/screenshots/ingest.png" width="700"> |
-| Settings | <img src="docs/screenshots/settings1.png" width="700"> |
-
-</details>
+| | |
+|---|---|
+| **Search + File Preview** | **Graph Hover + Preview** |
+| <img src="docs/screenshots/search-preview.png" width="400"> | <img src="docs/screenshots/graph-hover.png" width="400"> |
+| **Search Filter by Type** | **Local Graph Focus** |
+| <img src="docs/screenshots/search-filter.png" width="400"> | <img src="docs/screenshots/graph-local.png" width="400"> |
+| **Ingest Progress** | **File Manager** |
+| <img src="docs/screenshots/ingest.png" width="400"> | <img src="docs/screenshots/file-list.png" width="400"> |
+| **Settings - LLM** | **Settings - Buddy** |
+| <img src="docs/screenshots/settings1.png" width="400"> | <img src="docs/screenshots/settings2.png" width="400"> |
 
 - 3-column layout with artifact panel for research reports
 - Session management with auto-generated titles
