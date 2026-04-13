@@ -500,73 +500,101 @@ def _extract_eml(p: Path) -> dict:
     }
 
 
-def _extract_mbox(p: Path) -> dict:
-    """Extract all emails from an mbox file (Feishu export format)."""
-    import mailbox
-    import email
-    from email import policy
+def _decode_mime_header(s):
+    """Decode MIME-encoded header string."""
+    if not s:
+        return ""
     from email.header import decode_header
+    parts = decode_header(s)
+    decoded = []
+    for part, charset in parts:
+        if isinstance(part, bytes):
+            decoded.append(part.decode(charset or "utf-8", errors="replace"))
+        else:
+            decoded.append(part)
+    return " ".join(decoded)
 
-    def decode_mime(s):
-        if not s:
-            return ""
-        parts = decode_header(s)
-        decoded = []
-        for part, charset in parts:
-            if isinstance(part, bytes):
-                decoded.append(part.decode(charset or "utf-8", errors="replace"))
-            else:
-                decoded.append(part)
-        return " ".join(decoded)
 
-    mbox = mailbox.mbox(str(p))
-    all_parts = []
-    count = 0
+def _extract_single_email(msg) -> dict:
+    """Extract text and metadata from a single email message."""
+    subject = _decode_mime_header(msg.get("subject", "")) or "No Subject"
+    from_addr = _decode_mime_header(msg.get("from", ""))
+    to_addr = _decode_mime_header(msg.get("to", ""))
+    date = msg.get("date", "")
 
-    for msg in mbox:
-        try:
-            subject = decode_mime(msg.get("subject", "")) or "No Subject"
-            from_addr = decode_mime(msg.get("from", ""))
-            to_addr = decode_mime(msg.get("to", ""))
-            date = msg.get("date", "")
-
-            body = ""
-            if msg.is_multipart():
-                for part in msg.walk():
-                    ct = part.get_content_type()
-                    if ct == "text/plain":
-                        payload = part.get_payload(decode=True)
-                        if payload:
-                            charset = part.get_content_charset() or "utf-8"
-                            body += payload.decode(charset, errors="replace")
-                    elif ct == "text/html" and not body:
-                        payload = part.get_payload(decode=True)
-                        if payload:
-                            charset = part.get_content_charset() or "utf-8"
-                            html = payload.decode(charset, errors="replace")
-                            body = re.sub(r"<[^>]+>", " ", html)
-                            body = re.sub(r"\s+", " ", body).strip()
-            else:
-                payload = msg.get_payload(decode=True)
+    body = ""
+    if msg.is_multipart():
+        for part in msg.walk():
+            ct = part.get_content_type()
+            if ct == "text/plain":
+                payload = part.get_payload(decode=True)
                 if payload:
-                    charset = msg.get_content_charset() or "utf-8"
-                    body = payload.decode(charset, errors="replace")
-                    if msg.get_content_type() == "text/html":
-                        body = re.sub(r"<[^>]+>", " ", body)
-                        body = re.sub(r"\s+", " ", body).strip()
+                    charset = part.get_content_charset() or "utf-8"
+                    body += payload.decode(charset, errors="replace")
+            elif ct == "text/html" and not body:
+                payload = part.get_payload(decode=True)
+                if payload:
+                    charset = part.get_content_charset() or "utf-8"
+                    html = payload.decode(charset, errors="replace")
+                    body = re.sub(r"<[^>]+>", " ", html)
+                    body = re.sub(r"\s+", " ", body).strip()
+    else:
+        payload = msg.get_payload(decode=True)
+        if payload:
+            charset = msg.get_content_charset() or "utf-8"
+            body = payload.decode(charset, errors="replace")
+            if msg.get_content_type() == "text/html":
+                body = re.sub(r"<[^>]+>", " ", body)
+                body = re.sub(r"\s+", " ", body).strip()
 
-            all_parts.append(f"## {subject}\n\nFrom: {from_addr}\nTo: {to_addr}\nDate: {date}\n\n{body[:2000]}")
-            count += 1
+    text = f"Subject: {subject}\nFrom: {from_addr}\nTo: {to_addr}\nDate: {date}\n\n{body}"
+    return {
+        "text": text,
+        "metadata": {
+            "title": subject,
+            "from": from_addr,
+            "to": to_addr,
+            "date": date,
+        },
+    }
+
+
+def split_mbox(file_path: str) -> list:
+    """Split an mbox file into individual email dicts.
+    Returns list of {text, metadata, virtual_name} for each email.
+    """
+    import mailbox
+    p = Path(file_path)
+    mbox = mailbox.mbox(str(p))
+    emails = []
+    for i, msg in enumerate(mbox):
+        try:
+            result = _extract_single_email(msg)
+            subject = result["metadata"]["title"]
+            # Create a virtual filename for this email
+            safe_subject = re.sub(r'[^\w\s\-]', '', subject)[:60].strip() or f"email_{i}"
+            result["virtual_name"] = f"{safe_subject}.eml"
+            result["email_index"] = i
+            result["source_mbox"] = str(p)
+            emails.append(result)
         except Exception:
             continue
-
     mbox.close()
+    return emails
 
+
+def _extract_mbox(p: Path) -> dict:
+    """Extract all emails from an mbox file — returns combined text.
+    Individual emails are split during ingest (see split_mbox)."""
+    emails = split_mbox(str(p))
+    if not emails:
+        return {"text": "", "metadata": {"title": p.stem}}
+    all_parts = [e["text"][:2000] for e in emails]
     return {
         "text": "\n\n---\n\n".join(all_parts),
         "metadata": {
-            "title": f"{p.stem} ({count} emails)",
-            "email_count": count,
+            "title": f"{p.stem} ({len(emails)} emails)",
+            "email_count": len(emails),
         },
     }
 

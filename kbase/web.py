@@ -265,6 +265,25 @@ def create_app(workspace: str = "default") -> FastAPI:
         finally:
             store.close()
 
+    @app.post("/api/files/remove")
+    async def api_remove_file_by_path(request: Request):
+        body = await request.json()
+        path = body.get("path", "")
+        if not path:
+            raise HTTPException(400, "No path")
+        store = get_store()
+        try:
+            store.remove_file(path)
+            # Also clean graph edges
+            fid = store.file_id(path)
+            c = store.conn.cursor()
+            c.execute("DELETE FROM document_edges WHERE source_file_id=? OR target_file_id=?", (fid, fid))
+            c.execute("DELETE FROM graph_node_positions WHERE file_id=?", (fid,))
+            store.conn.commit()
+            return {"status": "removed"}
+        except Exception as e:
+            raise HTTPException(500, str(e))
+
     # ---- Ingested Directories API ----
 
     @app.get("/api/ingest-dirs")
@@ -313,6 +332,44 @@ def create_app(workspace: str = "default") -> FastAPI:
             dirs[path]["enabled"] = enabled
             save_settings(workspace, settings_data)
         return {"status": "ok", "path": path, "enabled": enabled}
+
+    @app.post("/api/ingest-dirs/remove")
+    async def api_remove_ingest_dir(request: Request):
+        """Remove a directory and all its files from the index."""
+        body = await request.json()
+        path = body.get("path", "")
+        if not path:
+            raise HTTPException(400, "No path provided")
+        store = get_store()
+        c = store.conn.cursor()
+        # Find all files matching this directory (by source_dir or file_path prefix)
+        c.execute("""SELECT file_id, file_path FROM files
+                     WHERE source_dir = ? OR file_path LIKE ? OR source_dir LIKE ?""",
+                  (path, path + "%", path + "%"))
+        files = c.fetchall()
+        removed = 0
+        file_ids = []
+        for f in files:
+            try:
+                file_ids.append(f["file_id"])
+                store.remove_file(f["file_path"])
+                removed += 1
+            except Exception:
+                pass
+        # Also clean up graph edges for removed files
+        if file_ids:
+            placeholders = ",".join("?" * len(file_ids))
+            c.execute(f"DELETE FROM document_edges WHERE source_file_id IN ({placeholders}) OR target_file_id IN ({placeholders})",
+                      file_ids + file_ids)
+            c.execute(f"DELETE FROM graph_node_positions WHERE file_id IN ({placeholders})", file_ids)
+            store.conn.commit()
+        # Remove from settings
+        settings_data = load_settings(workspace)
+        dirs = settings_data.get("ingest_dirs", {})
+        if path in dirs:
+            del dirs[path]
+            save_settings(workspace, settings_data)
+        return {"status": "ok", "removed_files": removed, "path": path}
 
     # ---- Natural Language SQL API ----
 
@@ -849,6 +906,310 @@ del "%~f0" >nul 2>&1
             os.kill(os.getpid(), signal.SIGKILL)
         threading.Thread(target=_do_shutdown, daemon=True).start()
         return {"success": True, "message": "Installing update... KBase will restart."}
+
+    # ---- File Preview API ----
+
+    @app.get("/api/file-preview/{file_id}")
+    def api_file_preview(file_id: str, max_chunks: int = Query(8)):
+        """Get file content preview by file_id — returns original chunks from ChromaDB."""
+        store = get_store()
+        c = store.conn.cursor()
+        c.execute("SELECT file_path, file_name, file_type, chunk_count, source_dir FROM files WHERE file_id = ?", (file_id,))
+        row = c.fetchone()
+        if not row:
+            raise HTTPException(404, "File not found")
+        info = dict(row)
+        import shutil
+        info["can_convert"] = True  # always true — Python libs as fallback
+
+        # Get original text from ChromaDB (not jieba-segmented FTS)
+        try:
+            results = store.collection.get(
+                where={"file_id": file_id},
+                include=["documents", "metadatas"],
+            )
+            # Sort by chunk_index, filter out parent chunks
+            chunk_pairs = []
+            for i, meta in enumerate(results.get("metadatas", [])):
+                is_parent = meta.get("is_parent")
+                if is_parent and str(is_parent).lower() in ("true", "1"):
+                    continue
+                idx = meta.get("chunk_index", i)
+                chunk_pairs.append((idx, results["documents"][i], meta))
+            chunk_pairs.sort(key=lambda x: x[0])
+            chunks = [{"text": cp[1], "metadata": cp[2]} for cp in chunk_pairs[:max_chunks]]
+        except Exception:
+            chunks = []
+        # Also get edges for this file
+        c.execute("""
+            SELECT e.edge_id, e.edge_type, e.label, e.direction, e.score, e.method,
+                   CASE WHEN e.source_file_id = ? THEN f2.file_name ELSE f1.file_name END as neighbor_name,
+                   CASE WHEN e.source_file_id = ? THEN e.target_file_id ELSE e.source_file_id END as neighbor_id
+            FROM document_edges e
+            LEFT JOIN files f1 ON e.source_file_id = f1.file_id
+            LEFT JOIN files f2 ON e.target_file_id = f2.file_id
+            WHERE e.source_file_id = ? OR e.target_file_id = ?
+            ORDER BY e.score DESC LIMIT 10
+        """, (file_id, file_id, file_id, file_id))
+        edges = [dict(r) for r in c.fetchall()]
+        return {**info, "chunks": chunks, "edges": edges}
+
+    @app.get("/api/file-serve/{file_id}")
+    def api_file_serve(file_id: str):
+        """Serve the original file for preview (PDF/HTML/image)."""
+        from fastapi.responses import FileResponse
+        store = get_store()
+        c = store.conn.cursor()
+        c.execute("SELECT file_path, file_type FROM files WHERE file_id = ?", (file_id,))
+        row = c.fetchone()
+        if not row:
+            raise HTTPException(404, "File not found")
+        file_path = row["file_path"]
+        if not os.path.isfile(file_path):
+            raise HTTPException(404, "File no longer exists on disk")
+        mime_map = {
+            '.pdf': 'application/pdf',
+            '.html': 'text/html', '.htm': 'text/html',
+            '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+            '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp',
+            '.md': 'text/markdown', '.txt': 'text/plain',
+            '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.wav': 'audio/wav',
+        }
+        ext = (row["file_type"] or "").lower()
+        media_type = mime_map.get(ext, 'application/octet-stream')
+        from starlette.responses import Response
+        with open(file_path, 'rb') as f:
+            content = f.read()
+        headers = {"Content-Disposition": "inline"}  # inline, not download
+        return Response(content=content, media_type=media_type, headers=headers)
+
+    @app.get("/api/file-slides/{file_id}")
+    def api_file_slides(file_id: str):
+        """Convert PPTX to per-slide PNG images using LibreOffice."""
+        import shutil, tempfile, glob as globmod
+        store = get_store()
+        c = store.conn.cursor()
+        c.execute("SELECT file_path, file_type FROM files WHERE file_id = ?", (file_id,))
+        row = c.fetchone()
+        if not row:
+            raise HTTPException(404, "File not found")
+        file_path = row["file_path"]
+        if not os.path.isfile(file_path):
+            raise HTTPException(404, "File no longer exists")
+
+        # Output directory per file
+        slides_dir = os.path.join(tempfile.gettempdir(), "kbase-slides", file_id)
+        os.makedirs(slides_dir, exist_ok=True)
+
+        # Check if already converted
+        existing = sorted(globmod.glob(os.path.join(slides_dir, "*.png")))
+        if not existing:
+            if not shutil.which("soffice"):
+                raise HTTPException(400, "LibreOffice not installed")
+            # Convert PPTX -> PDF first, then PDF -> PNG pages
+            pdf_path = os.path.join(slides_dir, "slides.pdf")
+            subprocess.run(
+                ["soffice", "--headless", "--convert-to", "pdf", "--outdir", slides_dir, file_path],
+                capture_output=True, timeout=60,
+            )
+            # Find the generated PDF
+            pdfs = globmod.glob(os.path.join(slides_dir, "*.pdf"))
+            if pdfs:
+                pdf_path = pdfs[0]
+                # PDF -> PNG per page using PyMuPDF
+                try:
+                    import fitz
+                    doc = fitz.open(pdf_path)
+                    for i, page in enumerate(doc):
+                        pix = page.get_pixmap(dpi=150)
+                        pix.save(os.path.join(slides_dir, f"slide_{i:03d}.png"))
+                    doc.close()
+                except Exception as e:
+                    raise HTTPException(500, f"PNG conversion failed: {e}")
+            existing = sorted(globmod.glob(os.path.join(slides_dir, "*.png")))
+
+        if not existing:
+            raise HTTPException(500, "No slides generated")
+
+        return {"total": len(existing), "slides": [
+            f"/api/file-slide-img/{file_id}/{i}" for i in range(len(existing))
+        ]}
+
+    @app.get("/api/file-slide-img/{file_id}/{index}")
+    def api_file_slide_img(file_id: str, index: int):
+        """Serve a single slide PNG image."""
+        import tempfile, glob as globmod
+        slides_dir = os.path.join(tempfile.gettempdir(), "kbase-slides", file_id)
+        pngs = sorted(globmod.glob(os.path.join(slides_dir, "*.png")))
+        if index < 0 or index >= len(pngs):
+            raise HTTPException(404, "Slide not found")
+        with open(pngs[index], 'rb') as f:
+            content = f.read()
+        from starlette.responses import Response
+        return Response(content=content, media_type="image/png")
+
+    @app.get("/api/file-xlsx/{file_id}")
+    def api_file_xlsx(file_id: str):
+        """Parse XLSX into JSON for Luckysheet rendering."""
+        store = get_store()
+        c = store.conn.cursor()
+        c.execute("SELECT file_path FROM files WHERE file_id = ?", (file_id,))
+        row = c.fetchone()
+        if not row:
+            raise HTTPException(404, "File not found")
+        file_path = row["file_path"]
+        if not os.path.isfile(file_path):
+            raise HTTPException(404, "File no longer exists")
+
+        from openpyxl import load_workbook
+        from openpyxl.utils import get_column_letter
+        wb = load_workbook(file_path, read_only=True, data_only=True)
+        sheets = []
+        for idx, name in enumerate(wb.sheetnames[:10]):
+            ws = wb[name]
+            celldata = []
+            for r, row_data in enumerate(ws.iter_rows(max_row=500, values_only=False)):
+                for c_idx, cell in enumerate(row_data):
+                    if cell.value is not None:
+                        entry = {"r": r, "c": c_idx, "v": {"v": cell.value, "m": str(cell.value)}}
+                        if cell.font and cell.font.bold:
+                            entry["v"]["bl"] = 1
+                        celldata.append(entry)
+            sheets.append({
+                "name": name,
+                "index": idx,
+                "order": idx,
+                "status": 1 if idx == 0 else 0,
+                "celldata": celldata,
+                "config": {},
+            })
+        wb.close()
+        return sheets
+
+    @app.get("/api/file-convert/{file_id}")
+    def api_file_convert(file_id: str):
+        """Convert PPTX/DOCX/XLSX to PDF (LibreOffice) or HTML (fallback)."""
+        import shutil, tempfile
+        store = get_store()
+        c = store.conn.cursor()
+        c.execute("SELECT file_path, file_type FROM files WHERE file_id = ?", (file_id,))
+        row = c.fetchone()
+        if not row:
+            raise HTTPException(404, "File not found")
+        file_path = row["file_path"]
+        ext = (row["file_type"] or "").lower()
+        if not os.path.isfile(file_path):
+            raise HTTPException(404, "File no longer exists")
+
+        # Try LibreOffice first — renders PPTX/DOCX faithfully as PDF
+        if shutil.which("soffice"):
+            tmp_dir = os.path.join(tempfile.gettempdir(), "kbase-convert")
+            os.makedirs(tmp_dir, exist_ok=True)
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            pdf_out = os.path.join(tmp_dir, base_name + ".pdf")
+            if not os.path.exists(pdf_out):
+                try:
+                    subprocess.run(
+                        ["soffice", "--headless", "--convert-to", "pdf", "--outdir", tmp_dir, file_path],
+                        capture_output=True, timeout=30,
+                    )
+                except Exception:
+                    pass
+            if os.path.exists(pdf_out):
+                with open(pdf_out, 'rb') as f:
+                    content = f.read()
+                from starlette.responses import Response
+                return Response(content=content, media_type="application/pdf",
+                                headers={"Content-Disposition": "inline"})
+
+        html_parts = ['<html><head><meta charset="utf-8"><style>',
+            'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:20px;color:#1f2937;line-height:1.6;max-width:800px;margin:0 auto;}',
+            'h1,h2,h3{color:#4f46e5;margin:16px 0 8px;}',
+            'table{border-collapse:collapse;width:100%;margin:12px 0;}',
+            'th,td{border:1px solid #e5e7eb;padding:6px 10px;text-align:left;font-size:13px;}',
+            'th{background:#f3f4f6;font-weight:600;}',
+            '.slide{border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px;margin:16px 0;background:#fafafa;}',
+            '.slide-num{color:#6366f1;font-weight:700;font-size:12px;margin-bottom:8px;}',
+            'img{max-width:100%;border-radius:4px;}',
+            'p{margin:4px 0;}',
+            '</style></head><body>']
+
+        try:
+            if ext in ('.pptx', '.ppt'):
+                from pptx import Presentation
+                prs = Presentation(file_path)
+                for i, slide in enumerate(prs.slides):
+                    html_parts.append(f'<div class="slide"><div class="slide-num">Slide {i+1}</div>')
+                    for shape in slide.shapes:
+                        if shape.has_text_frame:
+                            for para in shape.text_frame.paragraphs:
+                                text = para.text.strip()
+                                if not text:
+                                    continue
+                                if para.level == 0 and len(text) < 80:
+                                    html_parts.append(f'<h3>{text}</h3>')
+                                else:
+                                    html_parts.append(f'<p>{text}</p>')
+                        if shape.has_table:
+                            tbl = shape.table
+                            html_parts.append('<table>')
+                            for r, row in enumerate(tbl.rows):
+                                tag = 'th' if r == 0 else 'td'
+                                html_parts.append('<tr>' + ''.join(f'<{tag}>{cell.text}</{tag}>' for cell in row.cells) + '</tr>')
+                            html_parts.append('</table>')
+                    html_parts.append('</div>')
+
+            elif ext in ('.docx', '.doc'):
+                from docx import Document
+                doc = Document(file_path)
+                for para in doc.paragraphs:
+                    text = para.text.strip()
+                    if not text:
+                        continue
+                    style = para.style.name.lower() if para.style else ''
+                    if 'heading 1' in style:
+                        html_parts.append(f'<h1>{text}</h1>')
+                    elif 'heading 2' in style:
+                        html_parts.append(f'<h2>{text}</h2>')
+                    elif 'heading 3' in style:
+                        html_parts.append(f'<h3>{text}</h3>')
+                    else:
+                        # Check for bold runs
+                        runs_html = ''
+                        for run in para.runs:
+                            t = run.text
+                            if run.bold:
+                                t = f'<strong>{t}</strong>'
+                            if run.italic:
+                                t = f'<em>{t}</em>'
+                            runs_html += t
+                        html_parts.append(f'<p>{runs_html or text}</p>')
+                for table in doc.tables:
+                    html_parts.append('<table>')
+                    for r, row in enumerate(table.rows):
+                        tag = 'th' if r == 0 else 'td'
+                        html_parts.append('<tr>' + ''.join(f'<{tag}>{cell.text}</{tag}>' for cell in row.cells) + '</tr>')
+                    html_parts.append('</table>')
+
+            elif ext in ('.xlsx', '.xls', '.csv'):
+                from openpyxl import load_workbook
+                wb = load_workbook(file_path, read_only=True, data_only=True)
+                for sheet in wb.sheetnames[:5]:  # max 5 sheets
+                    ws = wb[sheet]
+                    html_parts.append(f'<h2>{sheet}</h2><table>')
+                    for r, row in enumerate(ws.iter_rows(max_row=100, values_only=True)):
+                        tag = 'th' if r == 0 else 'td'
+                        html_parts.append('<tr>' + ''.join(f'<{tag}>{cell if cell is not None else ""}</{tag}>' for cell in row) + '</tr>')
+                    html_parts.append('</table>')
+                wb.close()
+            else:
+                raise HTTPException(400, f"Unsupported format: {ext}")
+
+        except Exception as e:
+            html_parts.append(f'<p style="color:red;">Preview error: {str(e)[:200]}</p>')
+
+        html_parts.append('</body></html>')
+        return HTMLResponse(''.join(html_parts))
 
     # ---- Knowledge Graph API ----
 

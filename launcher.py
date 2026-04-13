@@ -21,6 +21,41 @@ if getattr(sys, 'frozen', False):
         sys.path.insert(0, user_pkgs)
 
 
+def check_libreoffice():
+    """Check and install LibreOffice if missing (background, non-blocking)."""
+    import shutil, subprocess, threading
+    if shutil.which("soffice"):
+        return
+    def _install():
+        try:
+            if IS_MACOS:
+                if shutil.which("brew"):
+                    subprocess.run(["brew", "install", "--cask", "libreoffice"],
+                                   capture_output=True, timeout=300)
+                else:
+                    # No brew — try downloading DMG directly
+                    import urllib.request, tempfile
+                    url = "https://download.documentfoundation.org/libreoffice/stable/25.2.3/mac/aarch64/LibreOffice_25.2.3_MacOS_aarch64.dmg"
+                    dmg = os.path.join(tempfile.gettempdir(), "LibreOffice.dmg")
+                    if not os.path.exists(dmg):
+                        urllib.request.urlretrieve(url, dmg)
+                    subprocess.run(["hdiutil", "attach", dmg, "-nobrowse", "-quiet"], capture_output=True, timeout=30)
+                    import glob
+                    apps = glob.glob("/Volumes/LibreOffice*/LibreOffice.app")
+                    if apps:
+                        subprocess.run(["cp", "-R", apps[0], "/Applications/"], capture_output=True, timeout=120)
+                        vol = apps[0].split("/")[2]
+                        subprocess.run(["hdiutil", "detach", f"/Volumes/{vol}", "-quiet"], capture_output=True)
+                    os.remove(dmg)
+            elif IS_WINDOWS:
+                subprocess.run(["winget", "install", "--id",
+                                "TheDocumentFoundation.LibreOffice", "-e", "--silent"],
+                               capture_output=True, timeout=300)
+        except Exception:
+            pass  # silent fail — preview falls back to Python HTML
+    threading.Thread(target=_install, daemon=True).start()
+
+
 def start_server():
     """Start the FastAPI server."""
     import uvicorn
@@ -181,6 +216,9 @@ def main():
         open_existing_browser()
     elif status == "zombie":
         kill_zombie()
+
+    # Check LibreOffice (background install if missing)
+    check_libreoffice()
 
     # Start server in a subprocess
     server_proc = multiprocessing.Process(target=start_server, daemon=True)

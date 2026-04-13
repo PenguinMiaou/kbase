@@ -11,6 +11,12 @@
 <script src="https://unpkg.com/cose-base@2.2.0/cose-base.js"></script>
 <script src="https://unpkg.com/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
 <script src="https://unpkg.com/cytoscape-edgehandles@4.0.1/cytoscape-edgehandles.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/plugins/css/pluginsCss.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/plugins/plugins.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/css/luckysheet.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/assets/iconfont/iconfont.css">
+<script src="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/plugins/js/plugin.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/luckysheet.umd.js"></script>
 </head>
 <body>
 <!-- Loading Screen -->
@@ -134,7 +140,7 @@
     <!-- Graph / Canvas Panel -->
     <div class="tab-panel" id="panel-graph" style="display:none;flex:1;padding:0;overflow:hidden;position:relative;">
       <!-- Toolbar -->
-      <div id="graph-toolbar" style="position:absolute;top:0;left:0;right:0;z-index:10;display:flex;align-items:center;gap:8px;padding:8px 16px;background:var(--bg);border-bottom:1px solid var(--border);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);">
+      <div id="graph-toolbar" style="position:absolute;top:0;left:0;right:0;z-index:10;display:flex;align-items:center;gap:6px;padding:6px 12px;background:var(--bg);border-bottom:1px solid var(--border);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);flex-wrap:nowrap;overflow-x:auto;">
         <!-- Mode switch -->
         <div style="display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
           <button id="graph-mode-graph" class="graph-mode-btn active" onclick="setGraphMode('graph')" title="Graph View">
@@ -147,11 +153,9 @@
           </button>
         </div>
         <!-- Search -->
-        <div style="flex:1;max-width:300px;">
-          <input id="graph-search" type="text" placeholder="Filter nodes..." style="width:100%;padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:12px;outline:none;">
-        </div>
+        <input id="graph-search" type="text" placeholder="Search..." style="flex-shrink:1;min-width:100px;max-width:200px;padding:4px 8px;border:1px solid var(--border);border-radius:5px;background:var(--card);color:var(--text);font-size:11px;outline:none;">
         <!-- Filters -->
-        <select id="graph-filter-type" onchange="applyGraphFilters()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:12px;">
+        <select id="graph-filter-type" onchange="applyGraphFilters()" style="padding:3px 4px;border:1px solid var(--border);border-radius:5px;background:var(--card);color:var(--text);font-size:10px;">
           <option value="">All Types</option>
           <option value="pptx">PPTX</option>
           <option value="docx">DOCX</option>
@@ -160,7 +164,7 @@
           <option value="md">Markdown</option>
           <option value="txt">Text</option>
         </select>
-        <select id="graph-filter-edges" onchange="applyGraphFilters()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:12px;">
+        <select id="graph-filter-edges" onchange="applyGraphFilters()" style="padding:3px 4px;border:1px solid var(--border);border-radius:5px;background:var(--card);color:var(--text);font-size:10px;">
           <option value="">All Edges</option>
           <option value="auto">Auto Only</option>
           <option value="confirmed">Confirmed</option>
@@ -168,10 +172,16 @@
         </select>
         <!-- Score slider -->
         <div style="display:flex;align-items:center;gap:4px;">
-          <span style="font-size:11px;color:var(--text-muted);white-space:nowrap;">Min:</span>
-          <input id="graph-min-score" type="range" min="0" max="100" value="0" step="5" onchange="applyGraphFilters()" style="width:80px;accent-color:var(--accent);">
-          <span id="graph-min-score-val" style="font-size:11px;color:var(--text-dim);min-width:28px;">0%</span>
+          <span style="font-size:10px;color:var(--text-muted);white-space:nowrap;">Min</span>
+          <input id="graph-min-score" type="range" min="0" max="100" value="85" step="5" onchange="applyGraphFilters()" style="width:60px;accent-color:var(--accent);">
+          <span id="graph-min-score-val" style="font-size:10px;color:var(--text-dim);min-width:24px;">85%</span>
         </div>
+        <input type="hidden" id="graph-max-nodes" value="9999">
+        <!-- Orphan toggle -->
+        <button id="graph-orphan-btn" onclick="toggleOrphans()" class="btn-outline" style="padding:4px 10px;font-size:12px;" title="Highlight orphan nodes (no connections)">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4" stroke-dasharray="3 3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+          <span data-i18n="orphans">Orphans</span>
+        </button>
         <!-- Actions -->
         <button onclick="computeGraph()" class="btn-outline" style="padding:4px 10px;font-size:12px;" title="Compute relationships">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
@@ -281,7 +291,7 @@
         <!-- Two column: Add Directory + Upload -->
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
           <!-- Add directory -->
-          <div class="ingest-card">
+          <div class="ingest-card" style="min-height:220px;">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
               <div style="width:32px;height:32px;border-radius:8px;background:var(--accent-light);display:flex;align-items:center;justify-content:center;">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/><path d="M12 11v6M9 14h6"/></svg>
@@ -303,7 +313,7 @@
               </button>
               <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);white-space:nowrap;cursor:pointer;"><input type="checkbox" id="ingest-force" style="accent-color:var(--accent);"> Force re-index</label>
             </div>
-            <div id="ingest-result" style="margin-top:10px;"></div>
+            <div id="ingest-result" style="margin-top:10px;min-height:90px;"></div>
           </div>
 
           <!-- Upload files -->
@@ -557,7 +567,7 @@
         <span id="artifact-title">Report</span>
       </h3>
       <div class="artifact-actions">
-        <button class="btn-primary" onclick="downloadArtifact()">
+        <button id="artifact-download-btn" class="btn-primary" onclick="downloadArtifact()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
           Download .md
         </button>

@@ -158,13 +158,23 @@ function switchTab(name){
     if(el)el.style.display=t===name?'flex':'none';
   });
 
+  // Hide chat title bar when not on chat tab
+  const titleBar=document.getElementById('session-title-bar');
+  if(titleBar)titleBar.style.display=name==='chat'?'':'none';
+
+  // Close artifact panel when leaving graph/search
+  if(name!=='graph'&&name!=='chat'&&name!=='search'){
+    closeArtifact();
+  }else if(name==='chat'&&_localFocusActive){
+    closeArtifact();
+  }
+
   // Load data for tab
   if(name==='files')loadFileList();
   if(name==='ingest')loadIngestDirs();
   if(name==='connectors')loadConnectorList();
   if(name==='settings')loadSettingsPanel();
   if(name==='graph'){/* handled by patch below */}
-  // Auto-focus chat input when switching to chat
   if(name==='chat'){const ci=document.getElementById('chat-input');if(ci)ci.focus();}
 }
 
@@ -514,11 +524,13 @@ function renderSources(kbSrc,webSrc){
   (kbSrc||[]).forEach((s,i)=>{
     const preview=(s.preview||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     const sid='src-'+Date.now()+'-'+i;
-    h+=`<span class="msg-source" id="${sid}" onclick="openFile('${(s.path||'').replace(/'/g,"\\'")}')"\
+    const fext=((s.name||'').split('.').pop()||'').toLowerCase();
+    const fname=(s.name||'').length>40?(s.name||'').substring(0,37)+'...':s.name||'';
+    h+=`<span class="msg-source" id="${sid}" onclick="showFilePreviewByMeta({id:'',label:'${esc(s.name||'')}',file_path:'${(s.path||'').replace(/'/g,"\\'")}',file_type:'.${fext}',degree:0,chunk_count:0})"\
       data-preview="${preview}" data-name="${esc(s.name||'')}" data-path="${esc(s.path||'')}"\
       onmouseenter="showSourcePreview(event,this)" onmouseleave="hideSourcePreview()">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
-      ${esc((s.name||'').substring(0,35))}</span>`;
+      ${fileTypeIcon(fext,14)}
+      ${esc(fname)}</span>`;
   });
   (webSrc||[]).forEach(w=>{
     h+=`<a href="${w.url}" target="_blank" class="msg-source" style="color:#60a5fa;">
@@ -631,12 +643,16 @@ function showArtifact(){
   const panel=document.getElementById('artifact-panel');
   panel.style.display='flex';
   document.getElementById('app').classList.add('has-artifact');
+  const dlBtn=document.getElementById('artifact-download-btn');
+  if(dlBtn)dlBtn.style.display=''; // show download button for reports
   document.getElementById('artifact-title').textContent='Research Report';
   document.getElementById('artifact-body').innerHTML=renderMarkdown(lastReport.text,[]);
 }
 function closeArtifact(){
   document.getElementById('artifact-panel').style.display='none';
   document.getElementById('app').classList.remove('has-artifact');
+  _slideData=null; // clear slide state
+  setTimeout(()=>{if(_cy)_cy.resize();},30);
 }
 function downloadArtifact(){
   if(!lastReport)return;
@@ -769,8 +785,8 @@ async function loadConvList(){
         const label=c.title||c.preview||'...';
         const ts=parseInt((c.id||'').replace('conv-',''))||0;
         const time=ts?new Date(ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'';
-        html+=`<div class="conv-item ${c.id===convId?'active':''}" onclick="switchConv('${c.id}')">
-          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(label)}</span>
+        html+=`<div class="conv-item ${c.id===convId?'active':''}" onclick="switchConv('${c.id}')" ondblclick="event.stopPropagation();renameConvInline(this,'${c.id}')">
+          <span class="conv-label" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(label)}</span>
           <span class="conv-time">${time}</span>
           <span class="conv-delete" onclick="event.stopPropagation();deleteConv('${c.id}')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/></svg>
@@ -851,14 +867,43 @@ async function deleteConv(id){
 
 function showHistory(){loadConvList();}
 
+function renameConvInline(el,cid){
+  const label=el.querySelector('.conv-label');
+  if(!label)return;
+  const oldText=label.textContent;
+  const input=document.createElement('input');
+  input.type='text';
+  input.value=oldText;
+  input.style.cssText='flex:1;padding:2px 4px;border:1px solid var(--accent);border-radius:4px;background:var(--card);color:var(--text);font-size:12px;outline:none;min-width:0;';
+  label.replaceWith(input);
+  input.focus();
+  input.select();
+
+  const save=async()=>{
+    const newTitle=input.value.trim()||oldText;
+    try{
+      await api('/api/conversations/'+cid+'/title',{method:'POST',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({title:newTitle})});
+      if(cid===convId)updateSessionTitle(newTitle);
+    }catch(e){}
+    loadConvList();
+  };
+  input.addEventListener('blur',save);
+  input.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();input.blur();}
+    if(e.key==='Escape'){input.value=oldText;input.blur();}
+  });
+}
+
 // === Search Tab ===
 async function doSearch(){
   const q=document.getElementById('search-q').value.trim();
   if(!q)return;
+  _searchTopK=50;
   const type=document.getElementById('search-type').value;
   const el=document.getElementById('search-results');
   el.innerHTML='<p style="color:var(--text-muted)">Searching...</p>';
-  const d=await api(`/api/search?q=${encodeURIComponent(q)}&type=${type}&top_k=15`);
+  const d=await api(`/api/search?q=${encodeURIComponent(q)}&type=${type}&top_k=${_searchTopK}`);
   if(!d.results||!d.results.length){el.innerHTML='<p style="color:var(--text-muted)">No results</p>';return;}
 
   // Expanded query suggestion
@@ -883,20 +928,42 @@ async function doSearch(){
     </div>`;
   }
 
+  // Collect unique file types for filter
+  const typeSet=new Set();
+  d.results.forEach(r=>{
+    const fn=r.metadata?.file_name||'';
+    const parts=fn.split('.');
+    if(parts.length>1)typeSet.add(parts.pop().toLowerCase());
+  });
+  const typeOptions=[...typeSet].sort().map(t=>
+    `<option value="${t}">${t.toUpperCase()}</option>`
+  ).join('');
+
   el.innerHTML=suggestHtml+
-    `<p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">${d.result_count} results (${(d.methods_used||[]).join('+')})</p>`+
+    `<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+      <span style="font-size:12px;color:var(--text-muted);">${d.result_count} results</span>
+      <select id="search-type-filter" onchange="filterSearchResults()" style="padding:3px 6px;border:1px solid var(--border);border-radius:5px;background:var(--card);color:var(--text);font-size:11px;">
+        <option value="">All Types</option>${typeOptions}
+      </select>
+      <span style="font-size:11px;color:var(--text-muted);">(${(d.methods_used||[]).join('+')})</span>
+    </div>`+
     d.results.map(r=>{
       const m=r.metadata||{};
+      const fn=m.file_name||'';
+      const fext=(fn.split('.').pop()||'').toLowerCase();
       const score=(r.rrf_score||r.rerank_score||r.score||0).toFixed(4);
       const text=esc((r.text||'').substring(0,300));
-      return `<div style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;cursor:pointer;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'" onclick="openFile('${(m.file_path||'').replace(/'/g,"\\'")}')">
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-          <span style="color:var(--accent);font-weight:500;font-size:13px;">${esc(m.file_name||'')}</span>
-          <span style="font-size:11px;color:var(--text-muted);">${score}</span>
+      return `<div class="search-result-card" data-filetype="${fext}" style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;cursor:pointer;transition:all 0.15s;" onmouseover="if(!this.classList.contains('active'))this.style.borderColor='var(--accent)'" onmouseout="if(!this.classList.contains('active'))this.style.borderColor='var(--border)'" onclick="selectSearchResult(this);showFilePreviewByMeta({id:'${m.file_id||''}',label:'${esc(fn)}',file_path:'${(m.file_path||'').replace(/'/g,"\\'")}',file_type:'${m.file_type||''}',degree:0,chunk_count:0})">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+          <div style="flex-shrink:0;">${fileTypeIcon(fext,20)}</div>
+          <span style="color:var(--accent);font-weight:500;font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(fn)}</span>
+          <span style="font-size:11px;color:var(--text-muted);flex-shrink:0;">${score}</span>
         </div>
         <div style="font-size:12px;color:var(--text-dim);line-height:1.5;">${text}</div>
       </div>`;
-    }).join('')+relatedHtml;
+    }).join('')+
+    (d.result_count>50?`<button id="search-load-more" onclick="loadMoreResults()" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--accent);cursor:pointer;font-size:13px;font-weight:500;transition:all 0.15s;margin-bottom:12px;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">${curLang==='zh'?'加载更多结果':'Load more results'} (${d.result_count-50}+)</button>`:'')+
+    relatedHtml;
 }
 
 // === SQL Tab ===
@@ -965,11 +1032,27 @@ async function loadFileList(){
   const d=await api('/api/files');
   if(!d.files||!d.files.length){el.innerHTML='<p style="color:var(--text-muted)">No files</p>';return;}
   const typeColors={'.pptx':'#ea580c','.docx':'#2563eb','.xlsx':'#059669','.pdf':'#dc2626','.md':'#7c3aed','.mbox':'#d97706'};
+  const fext=f=>(f.file_type||'').replace('.','').toLowerCase();
   el.innerHTML=`<p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">${d.count} files indexed</p>`+
-    d.files.map(f=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;cursor:pointer;" onclick="openFile('${(f.file_path||'').replace(/'/g,"\\'")}')">
-      <div><span style="color:${typeColors[f.file_type]||'var(--text-dim)'};font-weight:500;">${f.file_type}</span> <span>${esc(f.file_name)}</span></div>
-      <span style="color:var(--text-muted)">${f.chunk_count}ch</span>
+    d.files.map(f=>`<div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--border);font-size:12px;">
+      <div style="flex-shrink:0;">${fileTypeIcon(fext(f),22)}</div>
+      <div style="flex:1;min-width:0;cursor:pointer;" onclick="showFilePreviewByMeta({id:'${f.file_id||''}',label:'${esc(f.file_name||'')}',file_path:'${(f.file_path||'').replace(/'/g,"\\'")}',file_type:'${f.file_type||''}',degree:0,chunk_count:${f.chunk_count||0}})">
+        <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(f.file_path||'')}">${esc(f.file_name)}</div>
+      </div>
+      <span style="color:var(--text-muted);flex-shrink:0;">${f.chunk_count}ch</span>
+      <button onclick="event.stopPropagation();removeFile('${(f.file_path||'').replace(/'/g,"\\'")}')" style="flex-shrink:0;background:none;border:none;cursor:pointer;color:var(--text-muted);padding:2px;border-radius:4px;transition:color 0.15s;" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--text-muted)'" title="Remove from index">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+      </button>
     </div>`).join('');
+}
+
+async function removeFile(path){
+  if(!confirm(curLang==='zh'?'从索引中移除此文件？':'Remove this file from index?'))return;
+  // Immediately remove from UI
+  event.target.closest('[style*="border-bottom"]')?.remove();
+  // Backend in background
+  api('/api/files/remove',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({path:path})}).then(()=>{loadStats();}).catch(()=>{loadFileList();});
 }
 
 // === Ingest Tab ===
@@ -992,8 +1075,11 @@ async function loadIngestDirs(){
           <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(dir.path)}">${esc(dir.path)}</div>
           <div style="font-size:11px;color:var(--text-muted);">${dir.file_count} files | Last sync: ${dir.ago} | ${dir.enabled?'Active':'Disabled'}</div>
         </div>
-        <button onclick="resyncDir('${dir.path.replace(/'/g,"\\'")}')" style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text-dim);cursor:pointer;font-size:11px;white-space:nowrap;" title="Re-sync this directory">
+        <button onclick="resyncDir('${dir.path.replace(/'/g,"\\'")}')" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text-dim);cursor:pointer;font-size:11px;white-space:nowrap;" title="Re-sync">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg> Sync
+        </button>
+        <button onclick="removeDir('${dir.path.replace(/'/g,"\\'")}')" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--red,#dc2626);cursor:pointer;font-size:11px;white-space:nowrap;" title="Remove directory and its files from index">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
         </button>
       </div>`;
     }).join('');
@@ -1006,6 +1092,23 @@ async function toggleDir(el,path,enabled){
   await api('/api/ingest-dirs/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path,enabled})});
   el.classList.toggle('on',enabled);
   loadIngestDirs();
+}
+
+async function removeDir(path){
+  const msg=curLang==='zh'
+    ?`确定移除 "${path}" 及其所有已索引文件？\n(不会删除原始文件，只从索引中清除)`
+    :`Remove "${path}" and all its indexed files from KBase?\n(Original files will NOT be deleted)`;
+  if(!confirm(msg))return;
+  // Immediately remove from UI (don't wait for backend)
+  const el=document.getElementById('ingest-result');
+  if(el)el.innerHTML='';
+  loadIngestDirs(); // will re-render without the deleted dir after settings update
+  // Backend cleanup in background
+  try{await api('/api/ingest/stop',{method:'POST'});}catch(e){}
+  api('/api/ingest-dirs/remove',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({path:path})}).then(r=>{
+    loadStats();loadIngestDirs();
+  }).catch(()=>{});
 }
 
 async function resyncDir(path){
@@ -1038,7 +1141,7 @@ async function doIngestNew(){
   if(!path)return;
   const force=document.getElementById('ingest-force').checked;
   const el=document.getElementById('ingest-result');
-  el.innerHTML=`<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:8px;">
+  el.innerHTML=`<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:8px;min-height:80px;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
       <span style="font-size:12px;color:var(--text-dim);" id="ingest-status">Scanning files...</span>
       <div style="display:flex;align-items:center;gap:6px;">
@@ -1050,7 +1153,7 @@ async function doIngestNew(){
       <div id="ingest-bar" style="height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width 0.3s;"></div>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
-      <div style="font-size:11px;color:var(--text-muted);" id="ingest-file"></div>
+      <div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;height:16px;" id="ingest-file"></div>
       <div style="display:flex;gap:4px;" id="ingest-controls">
         <button onclick="toggleIngestPause()" id="ingest-pause-btn" style="padding:3px 10px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--card);color:var(--text);cursor:pointer;">Pause</button>
         <button onclick="stopIngest()" style="padding:3px 10px;font-size:11px;border:1px solid var(--red,#dc2626);border-radius:5px;background:none;color:var(--red,#dc2626);cursor:pointer;">Stop</button>
@@ -1870,6 +1973,7 @@ const I18N={
     openFile:'打开文件',viewLocal:'查看局部图',pinNode:'固定位置',unpinNode:'取消固定',
     confirmEdge:'确认关系',deleteEdge:'删除关系',addLabel:'添加标签',
     computing:'正在计算...',computed:'计算完成',graphEmpty:'暂无图谱数据，请先导入文件并点击 Compute',
+    orphans:'孤岛',
     set_memory:'全局记忆',set_memory_desc:'KBase 会记住关键事实，持续优化回答',
     chunkMax:'分块大小',chunkOverlap:'重叠长度',memoryTurns:'记忆轮数',
     topK:'搜索结果数',reranking:'重排序',timeDecay:'时间衰减',
@@ -1907,6 +2011,7 @@ const I18N={
     openFile:'Open File',viewLocal:'Local Graph',pinNode:'Pin Position',unpinNode:'Unpin',
     confirmEdge:'Confirm',deleteEdge:'Delete',addLabel:'Add Label',
     computing:'Computing...',computed:'Done',graphEmpty:'No graph data yet. Ingest files and click Compute.',
+    orphans:'Orphans',
     set_memory:'Global Memory',set_memory_desc:'KBase remembers key facts across conversations.',
     chunkMax:'Chunk Max Size',chunkOverlap:'Chunk Overlap',memoryTurns:'Memory Turns',
     topK:'Search Top-K',reranking:'Re-ranking',timeDecay:'Time Decay',
@@ -2012,25 +2117,47 @@ function buildGraphStyle(){
   const edgeLabeledColor=isDark?'rgba(129,140,248,0.85)':'rgba(99,102,241,0.7)';
 
   return [
-    // Nodes
+    // Nodes — size and opacity by degree (hub = large bright, leaf = small faint)
     {selector:'node',style:{
-      'background-color':accent,
+      'background-color':function(ele){
+        const d=ele.data('degree')||0;
+        if(d>=8)return accent; // hub: full accent
+        if(d>=4)return isDark?'rgba(129,140,248,0.8)':'rgba(99,102,241,0.8)';
+        if(d>=2)return isDark?'rgba(129,140,248,0.5)':'rgba(99,102,241,0.5)';
+        return isDark?'rgba(129,140,248,0.3)':'rgba(99,102,241,0.3)'; // leaf: faint
+      },
       'label':'data(label)',
-      'font-size':function(ele){return Math.max(8,Math.min(13,8+ele.data('degree')*0.4));},
-      'width':function(ele){return Math.max(12,Math.min(50,12+ele.data('degree')*3));},
-      'height':function(ele){return Math.max(12,Math.min(50,12+ele.data('degree')*3));},
+      'font-size':function(ele){
+        const d=ele.data('degree')||0;
+        if(d>=8)return 14;
+        if(d>=4)return 11;
+        return 9;
+      },
+      'width':function(ele){
+        const d=ele.data('degree')||0;
+        return Math.max(8,Math.min(60,8+Math.sqrt(d)*8));
+      },
+      'height':function(ele){
+        const d=ele.data('degree')||0;
+        return Math.max(8,Math.min(60,8+Math.sqrt(d)*8));
+      },
       'color':textDim,
       'text-valign':'bottom',
       'text-margin-y':4,
       'text-outline-width':2,
       'text-outline-color':bg,
-      'text-max-width':120,
+      'text-max-width':140,
       'text-wrap':'ellipsis',
       'border-width':0,
       'overlay-opacity':0,
       'transition-property':'width, height, background-color, opacity, border-width',
       'transition-duration':'0.15s',
-      'text-opacity':function(ele){return ele.data('degree')>2?1:0.7;},
+      'text-opacity':function(ele){
+        const d=ele.data('degree')||0;
+        if(d>=6)return 1;    // hub: always show label
+        if(d>=3)return 0.6;  // medium: semi-visible
+        return 0;            // leaf: hidden (shown on hover)
+      },
     }},
     // Node colors by file type
     {selector:'node[file_type="pptx"]',style:{'background-color':'#ef4444'}},
@@ -2052,13 +2179,28 @@ function buildGraphStyle(){
       'background-color':accent,'border-width':2,'border-color':accent,
       'font-weight':'bold','z-index':20,'text-opacity':1,
     }},
-    {selector:'.unhover',style:{'opacity':0.15}},
+    // (unhover styles moved to END of stylesheet for priority)
     {selector:'node.connected-hover',style:{'opacity':1,'text-opacity':1,'border-width':1,'border-color':accent}},
     // Selected
     {selector:'node:selected',style:{'border-width':3,'border-color':accent,'overlay-opacity':0.08,'overlay-color':accent}},
     // Search highlight
     {selector:'node.search-match',style:{'border-width':2,'border-color':'#f59e0b','overlay-opacity':0.1,'overlay-color':'#f59e0b'}},
     {selector:'node.search-dim',style:{'opacity':0.12}},
+    // Orphan nodes — small, gray, dashed border
+    {selector:'node.orphan',style:{
+      'background-color':isDark?'rgba(148,163,184,0.3)':'rgba(107,114,128,0.3)',
+      'width':8,'height':8,
+      'border-width':1,'border-style':'dashed',
+      'border-color':isDark?'rgba(148,163,184,0.4)':'rgba(107,114,128,0.4)',
+      'text-opacity':0,'label':'',
+    }},
+    // Orphan highlighted (when "Show Orphans" is active)
+    {selector:'node.orphan-highlight',style:{
+      'background-color':'#f59e0b','width':14,'height':14,
+      'border-width':2,'border-style':'solid','border-color':'#f59e0b',
+      'text-opacity':1,'label':'data(label)','font-size':10,
+      'color':isDark?'#fbbf24':'#d97706',
+    }},
 
     // Edges — auto (dashed, faint)
     {selector:'edge[edge_type="auto"]',style:{
@@ -2103,11 +2245,40 @@ function buildGraphStyle(){
       'shape':'ellipse','overlay-opacity':0,'border-width':8,'border-opacity':0,
     }},
     {selector:'.eh-hover',style:{'background-color':'#ef4444'}},
-    {selector:'.eh-source',style:{'border-width':2,'border-color':'#ef4444'}},
+    {selector:'.eh-source',style:{'border-width':3,'border-color':'#ef4444','overlay-opacity':0.15,'overlay-color':'#ef4444'}},
     {selector:'.eh-target',style:{'border-width':2,'border-color':'#ef4444'}},
     {selector:'.eh-preview, .eh-ghost-edge',style:{
       'line-color':'#ef4444','target-arrow-color':'#ef4444',
       'target-arrow-shape':'triangle',
+    }},
+
+    // LOCAL GRAPH FOCUS — must be LAST for highest priority
+    {selector:'node.local-center',style:{
+      'opacity':1,'border-width':4,'border-color':accent,'z-index':30,
+      'overlay-opacity':0.12,'overlay-color':accent,
+      'text-opacity':1,'font-weight':'bold',
+    }},
+    {selector:'node.local-neighbor',style:{
+      'opacity':1,'text-opacity':1,'z-index':20,
+      'border-width':1.5,'border-color':accent,
+    }},
+    {selector:'edge.local-neighbor',style:{
+      'opacity':0.8,'width':2.5,'z-index':15,
+      'line-color':edgeConfirmedColor,
+    }},
+    {selector:'node.local-fade',style:{
+      'opacity':0.03,'text-opacity':0,'z-index':0,
+      'events':'no', // disable all mouse events on faded nodes
+    }},
+    {selector:'edge.local-fade',style:{
+      'opacity':0,'display':'none',
+    }},
+    // HOVER STATES — must be at END for highest priority
+    {selector:'node.unhover',style:{
+      'opacity':0.04,'text-opacity':0,
+    }},
+    {selector:'edge.unhover',style:{
+      'opacity':0,'display':'none',
     }},
   ];
 }
@@ -2127,23 +2298,39 @@ async function initGraph(){
     boxSelectionEnabled:true,
   });
 
-  // Register fcose if available
-  if(typeof cytoscapeFcose!=='undefined')cytoscape.use(cytoscapeFcose);
+  // Register extensions safely
+  try{
+    if(typeof cytoscapeFcose==='function')cytoscape.use(cytoscapeFcose);
+    else if(window.cytoscapeFcose)cytoscape.use(window.cytoscapeFcose);
+  }catch(e){console.warn('fcose registration:',e);}
 
-  // Edgehandles
-  if(typeof cytoscapeEdgehandles!=='undefined'){
-    cytoscape.use(cytoscapeEdgehandles);
-  }
-  _edgehandles=_cy.edgehandles({
-    snap:true,
-    noEdgeEventsInDraw:true,
-    complete:function(src,tgt,addedEdge){
-      // When user draws a new edge
-      addedEdge.remove(); // remove the temporary edge
-      createEdgeFromDraw(src.id(),tgt.id());
+  try{
+    if(typeof cytoscapeEdgehandles==='function')cytoscape.use(cytoscapeEdgehandles);
+    else if(window.cytoscapeEdgehandles)cytoscape.use(window.cytoscapeEdgehandles);
+  }catch(e){console.warn('edgehandles registration:',e);}
+
+  // Init edgehandles (try extension, fallback to manual)
+  try{
+    if(typeof _cy.edgehandles==='function'){
+      _edgehandles=_cy.edgehandles({
+        snap:true,
+        noEdgeEventsInDraw:true,
+        complete:function(src,tgt,addedEdge){
+          addedEdge.remove();
+          createEdgeFromDraw(src.id(),tgt.id());
+        }
+      });
+      _edgehandles.disableDrawMode();
+    }else{
+      console.log('edgehandles extension not available, using manual connect mode');
+      _edgehandles=null;
     }
-  });
-  if(_graphMode!=='canvas')_edgehandles.disableDrawMode();
+  }catch(e){
+    console.warn('edgehandles init:',e);
+    _edgehandles=null;
+  }
+
+  // (shift+click connect is handled in the unified tap handler above)
 
   // --- Event handlers ---
   // Hover: neighborhood highlighting (Juggl pattern)
@@ -2163,14 +2350,29 @@ async function initGraph(){
   _cy.on('mouseover','edge',function(e){e.target.addClass('hover');});
   _cy.on('mouseout','edge',function(e){e.target.removeClass('hover');});
 
-  // Click: show file in artifact panel
+  // Node tap: single=preview, double=local graph, shift=connect (canvas)
+  let _tapTimer=null;
+  let _tapTarget=null;
+  let _connectSource=null;
   _cy.on('tap','node',function(e){
-    const d=e.target.data();
-    if(d.file_path)openFile(d.file_path);
-  });
-  // Double-click: local graph
-  _cy.on('dbltap','node',function(e){
-    loadLocalGraph(e.target.id());
+    const node=e.target;
+    // Ignore clicks on faded background nodes
+    if(node.hasClass('local-fade'))return;
+    // Shift+click to connect nodes (works in canvas, local graph, and search)
+    if(e.originalEvent.shiftKey){
+      e.stopPropagation();
+      if(!_connectSource){
+        _connectSource=node;
+        node.addClass('eh-source');
+      }else if(_connectSource.id()!==node.id()){
+        createEdgeFromDraw(_connectSource.id(),node.id());
+        _connectSource.removeClass('eh-source');
+        _connectSource=null;
+      }
+      return;
+    }
+    // Single click = local graph + preview
+    loadLocalGraph(node.id());
   });
 
   // Right-click: context menu
@@ -2182,8 +2384,14 @@ async function initGraph(){
     e.originalEvent.preventDefault();
     showEdgeContextMenu(e);
   });
-  // Click canvas to dismiss context menu
-  _cy.on('tap',function(e){if(e.target===_cy)hideContextMenu();});
+  // Click empty canvas: dismiss context menu + exit local view (back to search or full)
+  _cy.on('tap',function(e){
+    if(e.target===_cy){
+      hideContextMenu();
+      if(_orphansHighlighted){toggleOrphans();return;}
+      if(_localFocusActive)exitLocalGraph();
+    }
+  });
 
   // Drag end: save position in canvas mode
   _cy.on('dragfree','node',function(e){
@@ -2194,21 +2402,56 @@ async function initGraph(){
     }
   });
 
-  // Search input
+  // Search input — filter + highlight + fit to matches
   const searchInput=document.getElementById('graph-search');
   if(searchInput){
+    let _searchDebounce=null;
     searchInput.addEventListener('input',function(){
-      const q=this.value.trim().toLowerCase();
-      if(!q){_cy.elements().removeClass('search-match search-dim');return;}
-      _cy.nodes().forEach(n=>{
-        const label=(n.data('label')||'').toLowerCase();
-        const path=(n.data('file_path')||'').toLowerCase();
-        if(label.includes(q)||path.includes(q)){
-          n.removeClass('search-dim').addClass('search-match');
-        }else{
-          n.removeClass('search-match').addClass('search-dim');
+      clearTimeout(_searchDebounce);
+      _searchDebounce=setTimeout(()=>{
+        const q=this.value.trim().toLowerCase();
+        // Clear all focus states
+        exitLocalGraphSilent();
+        _cy.elements().removeClass('search-match search-dim local-center local-neighbor local-fade');
+        hideLocalBackButton();
+        if(!q){
+          _searchContext=null;
+          exitLocalGraphSilent();
+          hideLocalBackButton();
+          graphFit(_cy.elements());
+          return;
         }
-      });
+
+        // Find matching nodes
+        let matched=_cy.collection();
+        _cy.nodes().forEach(n=>{
+          const label=(n.data('label')||'').toLowerCase();
+          const path=(n.data('file_path')||'').toLowerCase();
+          const dir=(n.data('source_dir')||'').toLowerCase();
+          if(label.includes(q)||path.includes(q)||dir.includes(q)){
+            matched=matched.union(n);
+          }
+        });
+
+        if(matched.length===0)return;
+
+        // Show matches + direct neighbors
+        const expanded=matched.closedNeighborhood();
+        matched.addClass('local-center');
+        expanded.nodes().not(matched).addClass('local-neighbor');
+        expanded.edges().addClass('local-neighbor');
+        _cy.elements().not(expanded).addClass('local-fade');
+
+        // Save search context for returning from local view
+        _searchContext={matched:matched,expanded:expanded};
+
+        graphAnimateFit(expanded);
+        _localFocusActive=true;
+        showLocalBackButton();
+
+        const sn=document.getElementById('graph-stat-nodes');
+        if(sn)sn.textContent=`"${q}": ${matched.length} results, ${expanded.nodes().length} related`;
+      },300);
     });
   }
   // Min score slider label
@@ -2217,7 +2460,15 @@ async function initGraph(){
     document.getElementById('graph-min-score-val').textContent=this.value+'%';
   });
 
-  // Load data
+  // Load data — auto-compute if no edges exist yet
+  const stats=await api('/api/graph/stats');
+  if(stats.edges_total===0&&stats.nodes>0){
+    // First time: auto compute
+    const st=document.getElementById('graph-statusbar');
+    if(st)st.innerHTML=`<span style="color:var(--accent);">${t('computing')} (${stats.nodes} files)...</span>`;
+    await api('/api/graph/compute',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    if(st)st.innerHTML='';
+  }
   await loadGraphData();
 }
 
@@ -2225,7 +2476,8 @@ async function initGraph(){
 async function loadGraphData(){
   if(!_cy)return;
   const params=new URLSearchParams();
-  const minScore=parseFloat(document.getElementById('graph-min-score')?.value||0)/100;
+  const slider=document.getElementById('graph-min-score');
+  const minScore=parseFloat(slider?.value||85)/100;
   if(minScore>0)params.set('min_score',minScore);
   const edgeFilter=document.getElementById('graph-filter-edges')?.value;
   if(edgeFilter)params.set('edge_type',edgeFilter);
@@ -2256,42 +2508,65 @@ async function loadGraphData(){
   }catch(e){}
 }
 
+const MAX_GRAPH_NODES=50; // default cap for readable graph
+
 function renderGraph(data){
   if(!_cy)return;
   _cy.elements().remove();
-  if(!data.nodes||data.nodes.length===0){
-    // Show empty state
-    return;
-  }
+  if(!data.nodes||data.nodes.length===0)return;
 
-  // Add elements
+  // Sort nodes by degree descending — show only top N most connected
+  const nodesByDegree=[...data.nodes].sort((a,b)=>(b.data.degree||0)-(a.data.degree||0));
+  const maxNodes=parseInt(document.getElementById('graph-max-nodes')?.value||MAX_GRAPH_NODES);
+  const topNodes=nodesByDegree.slice(0,maxNodes);
+  const topIds=new Set(topNodes.map(n=>n.data.id));
+
+  // Filter edges to only connect visible nodes
+  const visibleEdges=data.edges.filter(e=>topIds.has(e.data.source)&&topIds.has(e.data.target));
+
+  // Also include orphan nodes (degree=0) up to limit
+  const connectedIds=new Set();
+  visibleEdges.forEach(e=>{connectedIds.add(e.data.source);connectedIds.add(e.data.target);});
+  const orphans=data.nodes.filter(n=>!connectedIds.has(n.data.id)&&(n.data.degree||0)===0);
+  const remainingSlots=Math.max(0,maxNodes-topNodes.length);
+  const orphansToShow=orphans.slice(0,Math.max(20,remainingSlots));
+
+  // Build elements
   const elements=[];
-  data.nodes.forEach(n=>{
-    const el={group:'nodes',data:n.data};
+  topNodes.forEach(n=>{
+    const el={group:'nodes',data:{...n.data}};
     if(n.position&&n.position.x!==0&&n.position.y!==0)el.position=n.position;
     if(n.locked)el.locked=true;
     elements.push(el);
   });
-  data.edges.forEach(e=>{elements.push({group:'edges',data:e.data});});
+  orphansToShow.forEach(n=>{
+    const el={group:'nodes',data:{...n.data,is_orphan:true}};
+    elements.push(el);
+  });
+  visibleEdges.forEach(e=>{elements.push({group:'edges',data:e.data});});
   _cy.add(elements);
+
+  // Mark orphans with class
+  _cy.nodes().filter(n=>n.degree()===0).addClass('orphan');
 
   // Apply pinned class
   _cy.nodes().forEach(n=>{if(n.locked())n.addClass('pinned');});
+
+  // Update status bar
+  const sn=document.getElementById('graph-stat-nodes');
+  if(sn)sn.textContent=_cy.nodes().length+' / '+data.nodes.length+' nodes (top '+maxNodes+')';
 
   // Run layout
   if(_graphMode==='graph'){
     runForceLayout();
   }else{
-    // Canvas mode: use saved positions, or fcose for unpositioned
     const unpositioned=_cy.nodes().filter(n=>!n.position()||(!n.position().x&&!n.position().y));
     if(unpositioned.length>0&&unpositioned.length<_cy.nodes().length){
-      // Some nodes have positions, layout only unpositioned
       unpositioned.layout({name:'fcose',animate:true,animationDuration:600,
-        randomize:true,nodeRepulsion:4500,idealEdgeLength:80,gravity:0.25}).run();
+        randomize:true,nodeRepulsion:8000,idealEdgeLength:120,gravity:0.15}).run();
     }else if(unpositioned.length===_cy.nodes().length){
       runForceLayout();
     }
-    // Lock all nodes in canvas mode
     _cy.nodes().forEach(n=>{n.lock();n.addClass('pinned');});
   }
 }
@@ -2299,47 +2574,90 @@ function renderGraph(data){
 function runForceLayout(){
   if(!_cy||_cy.nodes().length===0)return;
   _cy.nodes().forEach(n=>{if(!n.hasClass('pinned'))n.unlock();});
-  _cy.layout({
-    name:'fcose',
-    quality:'default',
-    randomize:true,
-    animate:true,
-    animationDuration:800,
-    animationEasing:'ease-out-cubic',
-    nodeSeparation:75,
-    idealEdgeLength:function(edge){
-      const t=edge.data('edge_type');
-      if(t==='labeled')return 60;
-      if(t==='confirmed')return 80;
-      return 120; // auto edges: longer distance
-    },
-    edgeElasticity:function(edge){
-      const t=edge.data('edge_type');
-      return t==='auto'?0.2:0.45;
-    },
-    nodeRepulsion:function(node){return 4500+node.data('degree')*500;},
-    gravity:0.25,
-    gravityRange:3.8,
-    fit:true,
-    padding:50,
-  }).run();
+  const nodeCount=_cy.nodes().length;
+
+  // Try fcose first, fallback to built-in cose
+  const hasFcose=_cy.layout({name:'fcose'}).options&&true;
+  let layoutName='cose';
+  try{
+    // Test if fcose is available
+    const testLayout=_cy.layout({name:'fcose',animate:false});
+    if(testLayout)layoutName='fcose';
+  }catch(e){layoutName='cose';}
+
+  if(layoutName==='fcose'){
+    _cy.layout({
+      name:'fcose',
+      quality:'default',
+      randomize:true,
+      animate:true,
+      animationDuration:1000,
+      nodeSeparation:nodeCount>100?150:100,
+      idealEdgeLength:nodeCount>100?180:120,
+      edgeElasticity:0.2,
+      nodeRepulsion:nodeCount>100?12000:6000,
+      gravity:nodeCount>100?0.06:0.15,
+      gravityRange:3.8,
+      fit:true,
+      padding:60,
+    }).run();
+  }else{
+    // Concentric layout — places hubs in center, spreads outward by degree. Zero overlap.
+    _cy.layout({
+      name:'concentric',
+      animate:true,
+      animationDuration:600,
+      concentric:function(node){return node.data('degree')||0;},
+      levelWidth:function(nodes){return 2;}, // fewer nodes per ring = more spread
+      minNodeSpacing:60,
+      spacingFactor:1.5,
+      fit:true,
+      padding:60,
+    }).run();
+  }
 }
 
-function fitGraph(){if(_cy)_cy.fit(undefined,50);}
+function fitGraph(){if(_cy)graphFit(_cy.elements());}
+
+// Fit graph to elements
+function graphFit(eles,basePad){
+  if(!_cy)return;
+  _cy.fit(eles,basePad||60);
+}
+function graphAnimateFit(eles,basePad){
+  if(!_cy)return;
+  _cy.animate({fit:{eles:eles,padding:basePad||60}},{duration:400,easing:'ease-out-cubic'});
+}
 
 // --- Mode switching ---
 function setGraphMode(mode){
   _graphMode=mode;
   document.getElementById('graph-mode-graph')?.classList.toggle('active',mode==='graph');
   document.getElementById('graph-mode-canvas')?.classList.toggle('active',mode==='canvas');
+
+  // Canvas tip
+  let tip=document.getElementById('graph-canvas-tip');
   if(mode==='canvas'){
-    // Enable edgehandles draw mode
     if(_edgehandles)_edgehandles.enableDrawMode();
-    // Lock all nodes
-    if(_cy)_cy.nodes().forEach(n=>{n.lock();n.addClass('pinned');});
+    // Canvas: unlock nodes so they can be dragged, then re-lock on dragfree
+    if(_cy)_cy.nodes().forEach(n=>{n.unlock();});
+    // Show canvas tip
+    if(!tip){
+      tip=document.createElement('div');
+      tip.id='graph-canvas-tip';
+      tip.style.cssText='position:absolute;bottom:28px;left:50%;transform:translateX(-50%);z-index:15;padding:5px 16px;background:var(--accent);color:#fff;border-radius:6px;font-size:11px;opacity:0.85;pointer-events:none;white-space:nowrap;';
+      tip.textContent=curLang==='zh'
+        ?'Canvas: Drag node to move | Drag from edge of node to connect | Right-click for menu'
+        :'Canvas: Drag to move | Shift+click two nodes to connect | Right-click for menu';
+      if(curLang==='zh')tip.textContent='白板模式: 拖拽移动 | Shift+点两节点连线 | 右键菜单 | Esc 返回图谱';
+      else tip.textContent='Canvas: Drag to move | Shift+click two nodes to connect | Right-click menu | Esc to exit';
+      document.getElementById('panel-graph')?.appendChild(tip);
+      // Keep tip visible — don't auto-hide
+    }
   }else{
     if(_edgehandles)_edgehandles.disableDrawMode();
     _graphLocalCenter=null;
+    if(tip)tip.remove();
     if(_cy){
       _cy.nodes().forEach(n=>{n.unlock();n.removeClass('pinned');});
       runForceLayout();
@@ -2364,10 +2682,121 @@ async function computeGraph(){
 // --- Filter ---
 function applyGraphFilters(){loadGraphData();}
 
-// --- Local graph ---
-async function loadLocalGraph(fileId){
+// --- Orphan toggle ---
+let _orphansHighlighted=false;
+function toggleOrphans(){
+  if(!_cy)return;
+  const btn=document.getElementById('graph-orphan-btn');
+  _orphansHighlighted=!_orphansHighlighted;
+  if(_orphansHighlighted){
+    // Highlight orphans, fade connected nodes
+    const orphans=_cy.nodes('.orphan');
+    if(orphans.length===0){
+      _orphansHighlighted=false;
+      return;
+    }
+    orphans.addClass('orphan-highlight');
+    _cy.elements().not(orphans).addClass('local-fade');
+    graphAnimateFit(orphans);
+    if(btn)btn.style.borderColor='var(--accent)';
+    if(btn)btn.style.color='var(--accent)';
+    // Status
+    const sn=document.getElementById('graph-stat-nodes');
+    if(sn)sn.textContent=orphans.length+' orphan nodes (Shift+click to connect)';
+  }else{
+    _cy.nodes('.orphan').removeClass('orphan-highlight');
+    _cy.elements().removeClass('local-fade');
+    graphAnimateFit(_cy.elements());
+    if(btn)btn.style.borderColor='';
+    if(btn)btn.style.color='';
+  }
+}
+
+// --- Local graph: focus on a node's neighborhood in-place ---
+let _localFocusActive=false;
+let _searchContext=null; // stores {expanded, matched} from search so we can return to it
+
+function loadLocalGraph(fileId){
+  if(!_cy)return;
+  const node=_cy.getElementById(fileId);
+  if(!node||node.empty())return;
+
+  // Clicking same center node -> exit local, return to search if active
+  if(_localFocusActive&&_graphLocalCenter===fileId){
+    exitLocalGraph();
+    return;
+  }
+
+  // Clear local visual state only (preserve search context)
+  _cy.elements().removeClass('local-center local-neighbor local-fade');
+  _localFocusActive=true;
   _graphLocalCenter=fileId;
-  await loadGraphData();
+
+  // Highlight this node's neighborhood
+  const neighborhood=node.closedNeighborhood();
+  node.addClass('local-center');
+  neighborhood.nodes().not(node).addClass('local-neighbor');
+  neighborhood.edges().addClass('local-neighbor');
+  _cy.elements().not(neighborhood).addClass('local-fade');
+
+  showFilePreview(node.data());
+
+  // Resize cytoscape after artifact panel opens, then fit
+  setTimeout(()=>{
+    if(_cy)_cy.resize(); // recalculate container dimensions
+    graphAnimateFit(neighborhood,60);
+  },50);
+
+  const sn=document.getElementById('graph-stat-nodes');
+  if(sn)sn.textContent=`Local: ${node.data('label')} (${neighborhood.nodes().length} nodes)`;
+  showLocalBackButton();
+}
+
+function exitLocalGraph(){
+  _cy.elements().removeClass('local-center local-neighbor local-fade');
+  _localFocusActive=false;
+  _graphLocalCenter=null;
+  closeArtifact();
+
+  // If search is still active, return to search view
+  const searchInput=document.getElementById('graph-search');
+  const q=searchInput?.value?.trim();
+  if(q&&_searchContext){
+    // Re-apply search highlighting
+    _searchContext.matched.addClass('local-center');
+    _searchContext.expanded.nodes().not(_searchContext.matched).addClass('local-neighbor');
+    _searchContext.expanded.edges().addClass('local-neighbor');
+    _cy.elements().not(_searchContext.expanded).addClass('local-fade');
+    _localFocusActive=true;
+    // Don't change zoom — stay where user was
+  }else{
+    hideLocalBackButton();
+    if(_cy)graphAnimateFit(_cy.elements());
+  }
+  const sn=document.getElementById('graph-stat-nodes');
+  if(sn)sn.textContent=_cy.nodes().length+' nodes';
+}
+function exitLocalGraphSilent(){
+  if(!_cy)return;
+  _cy.elements().removeClass('local-center local-neighbor local-fade');
+  _localFocusActive=false;
+  _graphLocalCenter=null;
+}
+
+function showLocalBackButton(){
+  let btn=document.getElementById('graph-local-back');
+  if(btn)return;
+  btn=document.createElement('button');
+  btn.id='graph-local-back';
+  btn.className='btn-outline';
+  btn.style.cssText='position:absolute;top:52px;left:16px;z-index:15;padding:5px 12px;font-size:12px;display:flex;align-items:center;gap:4px;';
+  btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg><span>'+(curLang==='zh'?'返回全局图':'Back to full graph')+'</span>';
+  btn.onclick=exitLocalGraph;
+  document.getElementById('panel-graph')?.appendChild(btn);
+}
+function hideLocalBackButton(){
+  const btn=document.getElementById('graph-local-back');
+  if(btn)btn.remove();
 }
 
 // --- Tooltip ---
@@ -2468,9 +2897,15 @@ function hideContextMenu(){
 // --- Edge operations ---
 async function createEdgeFromDraw(sourceId,targetId){
   try{
-    await api('/api/graph/edge',{method:'POST',headers:{'Content-Type':'application/json'},
+    const result=await api('/api/graph/edge',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({source:sourceId,target:targetId,edge_type:'confirmed',direction:'forward'})});
-    await loadGraphData();
+    // Add edge directly to graph without full reload (preserves layout)
+    if(_cy&&result.edge_id){
+      _cy.add({group:'edges',data:{
+        id:result.edge_id,source:sourceId,target:targetId,
+        edge_type:'confirmed',label:'',direction:'forward',score:1.0,method:'manual'
+      }});
+    }
   }catch(e){console.error('Create edge error:',e);}
 }
 
@@ -2519,6 +2954,374 @@ async function saveEdgeModal(){
   }catch(e){console.error(e);}
 }
 
+// --- Focus node: highlight neighborhood, fade rest, show preview ---
+function focusNode(node){
+  if(!_cy||!node)return;
+  exitLocalGraphSilent();
+  _localFocusActive=true;
+  _graphLocalCenter=node.id();
+
+  const neighborhood=node.closedNeighborhood();
+  node.addClass('local-center');
+  neighborhood.nodes().not(node).addClass('local-neighbor');
+  neighborhood.edges().addClass('local-neighbor');
+  _cy.elements().not(neighborhood).addClass('local-fade');
+
+  showFilePreview(node.data());
+  showLocalBackButton();
+
+  const sn=document.getElementById('graph-stat-nodes');
+  if(sn)sn.textContent=`Focus: ${node.data('label')} (${neighborhood.nodes().length} nodes)`;
+}
+
+// --- File type icons (PNG where available, SVG fallback) ---
+function fileTypeIcon(ext,size){
+  const s=size||36;
+  // Official icons (PNG images)
+  const imageIcons={
+    pptx:'/static/logos/filetype-pptx.png',
+    ppt:'/static/logos/filetype-pptx.png',
+    docx:'/static/logos/filetype-docx.png',
+    doc:'/static/logos/filetype-docx.png',
+    xlsx:'/static/logos/filetype-xlsx.png',
+    xls:'/static/logos/filetype-xlsx.png',
+    csv:'/static/logos/filetype-xlsx.png',
+    md:'/static/logos/filetype-md.png',
+    pdf:'/static/logos/filetype-pdf.png',
+    txt:'/static/logos/filetype-txt.webp',
+  };
+  if(imageIcons[ext]){
+    return `<img src="${imageIcons[ext]}" width="${s}" height="${s}" style="object-fit:contain;">`;
+  }
+  // SVG fallback for other types
+  const svgIcons={
+    pdf:`<rect width="36" height="36" rx="6" fill="#E5252A"/><text x="18" y="24" text-anchor="middle" fill="#fff" font-size="12" font-weight="700" font-family="sans-serif">PDF</text>`,
+    txt:`<rect width="36" height="36" rx="6" fill="#6B7280"/><text x="18" y="24" text-anchor="middle" fill="#fff" font-size="11" font-weight="700" font-family="sans-serif">TXT</text>`,
+    html:`<rect width="36" height="36" rx="6" fill="#E44D26"/><text x="18" y="24" text-anchor="middle" fill="#fff" font-size="10" font-weight="700" font-family="sans-serif">HTML</text>`,
+    htm:`<rect width="36" height="36" rx="6" fill="#E44D26"/><text x="18" y="24" text-anchor="middle" fill="#fff" font-size="10" font-weight="700" font-family="sans-serif">HTML</text>`,
+    eml:`<rect width="36" height="36" rx="6" fill="#0078D4"/><path d="M8 12l10 7 10-7" fill="none" stroke="#fff" stroke-width="2"/><rect x="8" y="12" width="20" height="14" rx="2" fill="none" stroke="#fff" stroke-width="1.5"/>`,
+    mbox:`<rect width="36" height="36" rx="6" fill="#0078D4"/><path d="M8 12l10 7 10-7" fill="none" stroke="#fff" stroke-width="2"/><rect x="8" y="12" width="20" height="14" rx="2" fill="none" stroke="#fff" stroke-width="1.5"/>`,
+    mp3:`<rect width="36" height="36" rx="6" fill="#F59E0B"/><path d="M14 26V14l10-4v12" fill="none" stroke="#fff" stroke-width="2"/><circle cx="12" cy="26" r="3" fill="#fff"/><circle cx="22" cy="22" r="3" fill="#fff"/>`,
+    m4a:`<rect width="36" height="36" rx="6" fill="#F59E0B"/><path d="M14 26V14l10-4v12" fill="none" stroke="#fff" stroke-width="2"/><circle cx="12" cy="26" r="3" fill="#fff"/><circle cx="22" cy="22" r="3" fill="#fff"/>`,
+    wav:`<rect width="36" height="36" rx="6" fill="#F59E0B"/><path d="M14 26V14l10-4v12" fill="none" stroke="#fff" stroke-width="2"/><circle cx="12" cy="26" r="3" fill="#fff"/><circle cx="22" cy="22" r="3" fill="#fff"/>`,
+    zip:`<rect width="36" height="36" rx="6" fill="#78716C"/><text x="18" y="24" text-anchor="middle" fill="#fff" font-size="11" font-weight="700" font-family="sans-serif">ZIP</text>`,
+    rar:`<rect width="36" height="36" rx="6" fill="#78716C"/><text x="18" y="24" text-anchor="middle" fill="#fff" font-size="11" font-weight="700" font-family="sans-serif">RAR</text>`,
+    png:`<rect width="36" height="36" rx="6" fill="#06B6D4"/><path d="M10 24l5-7 4 5 3-3 6 5" fill="none" stroke="#fff" stroke-width="1.5"/><circle cx="14" cy="15" r="2" fill="#fff"/>`,
+    jpg:`<rect width="36" height="36" rx="6" fill="#06B6D4"/><path d="M10 24l5-7 4 5 3-3 6 5" fill="none" stroke="#fff" stroke-width="1.5"/><circle cx="14" cy="15" r="2" fill="#fff"/>`,
+  };
+  const inner=svgIcons[ext]||`<rect width="36" height="36" rx="6" fill="#94A3B8"/><text x="18" y="24" text-anchor="middle" fill="#fff" font-size="10" font-weight="600" font-family="sans-serif">${(ext||'?').toUpperCase().substring(0,4)}</text>`;
+  return `<svg width="${s}" height="${s}" viewBox="0 0 36 36">${inner}</svg>`;
+}
+
+// --- Show file preview from search results ---
+function selectSearchResult(el){
+  document.querySelectorAll('.search-result-card').forEach(c=>{
+    c.classList.remove('active');
+    c.style.borderColor='var(--border)';
+    c.style.background='';
+  });
+  el.classList.add('active');
+  el.style.borderColor='var(--accent)';
+  el.style.background='var(--accent-light)';
+}
+function showFilePreviewByMeta(meta){
+  showFilePreview(meta);
+}
+
+let _searchTopK=50;
+async function loadMoreResults(){
+  const q=document.getElementById('search-q')?.value?.trim();
+  if(!q)return;
+  const btn=document.getElementById('search-load-more');
+  if(btn)btn.textContent=curLang==='zh'?'加载中...':'Loading...';
+  _searchTopK+=50;
+  const type=document.querySelector('[name="search-type"]:checked')?.value||'auto';
+  const d=await api(`/api/search?q=${encodeURIComponent(q)}&type=${type}&top_k=${_searchTopK}`);
+  // Re-render with more results
+  renderSearchResults(d);
+}
+
+function filterSearchResults(){
+  const filter=document.getElementById('search-type-filter')?.value||'';
+  document.querySelectorAll('.search-result-card').forEach(card=>{
+    if(!filter||card.dataset.filetype===filter){
+      card.style.display='';
+    }else{
+      card.style.display='none';
+    }
+  });
+}
+
+// --- PPTX Slide Viewer ---
+let _slideData=null;
+let _slideIndex=0;
+async function loadSlides(fileId){
+  const bar=document.getElementById('slide-progress-bar');
+  const counter=document.getElementById('slide-counter');
+  // Simulate progress during server conversion
+  let fakeProgress=0;
+  const progressTimer=setInterval(()=>{
+    fakeProgress=Math.min(fakeProgress+8,90);
+    if(bar)bar.style.width=fakeProgress+'%';
+  },500);
+  try{
+    const d=await api(`/api/file-slides/${fileId}`);
+    clearInterval(progressTimer);
+    if(bar){bar.style.width='100%';}
+    _slideData=d;
+    _slideIndex=0;
+    // Hide progress bar after complete
+    setTimeout(()=>{
+      const prog=document.getElementById('slide-progress');
+      if(prog)prog.style.display='none';
+    },300);
+    renderSlide();
+    // Thumbnails
+    const thumbs=document.getElementById('slide-thumbs');
+    if(thumbs){
+      thumbs.innerHTML=d.slides.map((url,i)=>
+        `<img src="${url}" style="height:50px;border:2px solid ${i===0?'var(--accent)':'var(--border)'};border-radius:3px;cursor:pointer;flex-shrink:0;" onclick="slideGo(${i})" id="slide-thumb-${i}">`
+      ).join('');
+    }
+  }catch(e){
+    clearInterval(progressTimer);
+    if(bar)bar.style.width='0%';
+    if(counter)counter.textContent='Preview unavailable';
+  }
+}
+function renderSlide(){
+  if(!_slideData)return;
+  const img=document.getElementById('slide-img');
+  const counter=document.getElementById('slide-counter');
+  if(img)img.src=_slideData.slides[_slideIndex];
+  if(counter)counter.textContent=`${_slideIndex+1} / ${_slideData.total}`;
+  // Update thumb borders
+  document.querySelectorAll('[id^="slide-thumb-"]').forEach((t,i)=>{
+    t.style.borderColor=i===_slideIndex?'var(--accent)':'var(--border)';
+  });
+}
+function slideNav(dir){
+  if(!_slideData)return;
+  _slideIndex=Math.max(0,Math.min(_slideData.total-1,_slideIndex+dir));
+  renderSlide();
+}
+function slideGo(i){_slideIndex=i;renderSlide();}
+
+// --- XLSX Luckysheet Viewer ---
+async function loadSpreadsheet(fileId){
+  try{
+    const sheets=await api(`/api/file-xlsx/${fileId}`);
+    if(typeof luckysheet!=='undefined'){
+      luckysheet.create({
+        container:'luckysheet-host',
+        data:sheets,
+        showinfobar:false,
+        showsheetbar:true,
+        showstatisticBar:false,
+        sheetFormulaBar:false,
+        allowEdit:false,
+        enableAddRow:false,
+        enableAddBackTop:false,
+        showToolbar:false,
+        showFormulaBar:false,
+        row:500,
+        column:50,
+      });
+    }else{
+      document.getElementById('luckysheet-host').innerHTML='<p style="padding:20px;color:var(--text-muted);">Spreadsheet viewer loading failed.</p>';
+    }
+  }catch(e){
+    document.getElementById('luckysheet-host').innerHTML=`<p style="padding:20px;color:var(--red);">${esc(e.message)}</p>`;
+  }
+}
+
+// --- Format chunk content as rich HTML ---
+function formatChunkContent(text){
+  if(!text)return '';
+  let html=esc(text);
+
+  // [Slide N] / [Page N] markers -> styled badges
+  html=html.replace(/\[Slide\s*(\d+)\]/gi,'<span style="display:inline-block;padding:1px 6px;background:var(--accent-light);color:var(--accent);border-radius:4px;font-size:10px;font-weight:600;margin:2px 0;">Slide $1</span>');
+  html=html.replace(/\[Page\s*(\d+)\]/gi,'<span style="display:inline-block;padding:1px 6px;background:var(--accent-light);color:var(--accent);border-radius:4px;font-size:10px;font-weight:600;margin:2px 0;">Page $1</span>');
+
+  // [File: ...] [Title: ...] metadata markers -> subtle header
+  html=html.replace(/\[\s*File\s*:\s*([^\]]+)\]/gi,'<div style="font-size:10px;color:var(--text-muted);margin:4px 0;">$1</div>');
+  html=html.replace(/\[\s*Title\s*:\s*([^\]]+)\]/gi,'<div style="font-size:11px;color:var(--accent);font-weight:600;margin:4px 0;">$1</div>');
+
+  // Markdown-style headings: ## Heading
+  html=html.replace(/^(#{1,3})\s+(.+)$/gm,function(m,hashes,title){
+    const level=hashes.length;
+    const sizes={1:'16px',2:'14px',3:'13px'};
+    return `<div style="font-size:${sizes[level]||'13px'};font-weight:700;color:var(--text);margin:8px 0 4px;">${title}</div>`;
+  });
+
+  // Bold: **text** or __text__
+  html=html.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+  html=html.replace(/__(.+?)__/g,'<strong>$1</strong>');
+
+  // Bullet lists: lines starting with - or *
+  html=html.replace(/^[\-\*]\s+(.+)$/gm,'<div style="padding-left:12px;text-indent:-8px;margin:2px 0;">&#8226; $1</div>');
+
+  // Numbered lists: 1. 2. etc
+  html=html.replace(/^(\d+)\.\s+(.+)$/gm,'<div style="padding-left:14px;text-indent:-14px;margin:2px 0;"><span style="color:var(--accent);font-weight:500;">$1.</span> $2</div>');
+
+  // Double newlines -> paragraph break
+  html=html.replace(/\n\n+/g,'<div style="height:8px;"></div>');
+  // Single newlines -> line break
+  html=html.replace(/\n/g,'<br>');
+
+  return html;
+}
+
+// --- File preview in artifact panel ---
+async function showFilePreview(nodeData){
+  const panel=document.getElementById('artifact-panel');
+  if(!panel)return;
+  panel.style.display='flex';
+  document.getElementById('app').classList.add('has-artifact');
+  // Tell cytoscape the container resized
+  setTimeout(()=>{if(_cy)_cy.resize();},30);
+  // Hide download button (not a report)
+  const dlBtn=document.getElementById('artifact-download-btn');
+  if(dlBtn)dlBtn.style.display='none';
+  const titleEl=document.getElementById('artifact-title');
+  const bodyEl=document.getElementById('artifact-body');
+  if(titleEl)titleEl.textContent=nodeData.label||'File Preview';
+  if(bodyEl)bodyEl.innerHTML='<p style="color:var(--text-muted);font-size:13px;">Loading...</p>';
+
+  try{
+    const d=await api(`/api/file-preview/${nodeData.id}`);
+    let html='';
+
+    // Determine file extension early (needed for icon + preview type)
+    let ext=(d.file_type||'').toLowerCase().replace('.','');
+    if(!ext&&d.file_name){
+      const parts=d.file_name.split('.');
+      if(parts.length>1)ext=parts.pop().toLowerCase();
+    }
+
+    // Header: file info
+    html+=`<div style="padding:12px 16px;background:var(--accent-light);border-radius:8px;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:36px;height:36px;flex-shrink:0;">${fileTypeIcon(ext)}</div>
+        <div>
+          <div style="font-weight:600;font-size:14px;">${esc(d.file_name||'')}</div>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:2px;">${esc((d.file_type||'').toUpperCase().replace('.',''))} | ${d.chunk_count||0} chunks | ${(nodeData.degree||0)} connections</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:8px;word-break:break-all;">${esc(d.file_path||'')}</div>
+      <div style="margin-top:10px;display:flex;gap:6px;">
+        <button onclick="openFile('${(d.file_path||'').replace(/'/g,"\\'")}')" class="btn-outline" style="padding:4px 12px;font-size:11px;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          Open
+        </button>
+        <button onclick="loadLocalGraph('${nodeData.id}')" class="btn-outline" style="padding:4px 12px;font-size:11px;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2.5"/><path d="M7.5 7.5l3 3M13.5 13.5l3 3"/></svg>
+          Local Graph
+        </button>
+      </div>
+    </div>`;
+
+    // Related documents
+    if(d.edges&&d.edges.length>0){
+      html+=`<div style="margin-bottom:16px;">
+        <h4 style="font-size:13px;color:var(--text);margin-bottom:8px;">Related Documents</h4>`;
+      d.edges.forEach(e=>{
+        const scoreBar=Math.round((e.score||0)*100);
+        const typeLabel=e.edge_type==='auto'?'auto':e.edge_type==='confirmed'?'confirmed':e.label||'labeled';
+        html+=`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12px;cursor:pointer;" onclick="loadLocalGraph('${e.neighbor_id}')">
+          <div style="width:${scoreBar}px;max-width:60px;height:4px;background:var(--accent);border-radius:2px;flex-shrink:0;"></div>
+          <span style="color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(e.neighbor_name||'')}</span>
+          <span style="color:var(--text-muted);font-size:10px;flex-shrink:0;">${scoreBar}% ${typeLabel}</span>
+        </div>`;
+      });
+      html+='</div>';
+    }
+
+    // Content preview — native format when possible
+    // ext already defined above
+    const imageTypes=['png','jpg','jpeg','gif','svg','webp'];
+    const audioTypes=['mp3','m4a','wav'];
+    const slideTypes=['pptx','ppt'];
+    const spreadTypes=['xlsx','xls','csv'];
+    const docTypes=['docx','doc'];
+
+    if(ext==='pdf'||ext==='html'||ext==='htm'){
+      html+=`<iframe src="/api/file-serve/${nodeData.id}" style="width:100%;height:calc(100vh - 300px);border:none;background:#fff;"></iframe>`;
+
+    }else if(imageTypes.includes(ext)){
+      html+=`<img src="/api/file-serve/${nodeData.id}" style="max-width:100%;border-radius:6px;">`;
+
+    }else if(audioTypes.includes(ext)){
+      html+=`<audio controls src="/api/file-serve/${nodeData.id}" style="width:100%;margin:8px 0;"></audio>`;
+      if(d.chunks&&d.chunks.length>0){
+        html+=`<h4 style="font-size:13px;color:var(--text);margin:12px 0 8px;">Transcription</h4>`;
+        d.chunks.forEach(chunk=>{
+          const raw=typeof chunk==='string'?chunk:(chunk.text||'');
+          html+=`<div style="padding:10px 12px;background:var(--bg);border-radius:6px;border:1px solid var(--border);font-size:13px;line-height:1.8;">${formatChunkContent(raw)}</div>`;
+        });
+      }
+
+    }else if(slideTypes.includes(ext)){
+      // PPTX: slide-by-slide PNG viewer
+      html+=`<div id="slide-viewer" style="text-align:center;">
+        <div style="margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:12px;">
+          <button onclick="slideNav(-1)" style="padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);cursor:pointer;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
+          <div style="min-width:160px;text-align:center;">
+            <span id="slide-counter" style="font-size:12px;color:var(--text-dim);">Converting...</span>
+            <div id="slide-progress" style="width:160px;height:3px;background:var(--border);border-radius:2px;overflow:hidden;margin:4px auto 0;">
+              <div id="slide-progress-bar" style="width:0%;height:100%;background:var(--accent);border-radius:2px;transition:width 0.3s;"></div>
+            </div>
+          </div>
+          <button onclick="slideNav(1)" style="padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);cursor:pointer;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
+        </div>
+        <img id="slide-img" style="max-width:100%;max-height:calc(100vh - 400px);border:1px solid var(--border);border-radius:4px;box-shadow:var(--shadow-md);">
+        <div id="slide-thumbs" style="display:flex;gap:6px;overflow-x:auto;margin-top:10px;padding:4px 0;"></div>
+      </div>`;
+      _pendingPreview={type:'slides',fileId:nodeData.id};
+
+    }else if(spreadTypes.includes(ext)){
+      // XLSX: Luckysheet interactive viewer
+      html+=`<div id="luckysheet-host" style="width:100%;height:calc(100vh - 320px);border:1px solid var(--border);border-radius:6px;overflow:hidden;"></div>`;
+      _pendingPreview={type:'xlsx',fileId:nodeData.id};
+
+    }else if(docTypes.includes(ext)){
+      // DOCX: LibreOffice -> PDF iframe
+      html+=`<iframe src="/api/file-convert/${nodeData.id}" style="width:100%;height:calc(100vh - 300px);border:none;background:#fff;"></iframe>`;
+
+    }else{
+      // Text-based (MD/TXT/code) — render as one continuous document
+      if(d.chunks&&d.chunks.length>0){
+        const fullText=d.chunks.map(chunk=>typeof chunk==='string'?chunk:(chunk.text||'')).join('\n\n');
+        html+=`<div style="padding:16px 18px;background:var(--bg);border-radius:8px;border:1px solid var(--border);">
+          <div style="font-size:13px;color:var(--text);line-height:1.9;">${formatChunkContent(fullText)}</div>
+        </div>`;
+      }else{
+        html+='<p style="color:var(--text-muted);font-size:12px;">No content preview available.</p>';
+      }
+    }
+
+    if(bodyEl)bodyEl.innerHTML=html;
+
+    // Trigger deferred preview loaders (must run AFTER innerHTML is set)
+    if(_pendingPreview){
+      const pp=_pendingPreview;
+      _pendingPreview=null;
+      setTimeout(()=>{
+        if(pp.type==='slides')loadSlides(pp.fileId);
+        else if(pp.type==='xlsx')loadSpreadsheet(pp.fileId);
+      },100);
+    }
+  }catch(e){
+    if(bodyEl)bodyEl.innerHTML=`<p style="color:var(--red);">Error: ${esc(e.message)}</p>`;
+  }
+}
+let _pendingPreview=null;
+
 // --- Save node position ---
 async function saveNodePosition(node){
   const pos=node.position();
@@ -2553,3 +3356,38 @@ function updateGraphTheme(){
     else if(tab==='graph'&&_cy)updateGraphTheme();
   };
 })();
+
+// --- Global keyboard shortcuts ---
+document.addEventListener('keydown',function(e){
+  // Arrow keys: PPTX slide navigation (works on ANY tab)
+  if(_slideData&&(e.key==='ArrowLeft'||e.key==='ArrowRight')){
+    e.preventDefault();
+    slideNav(e.key==='ArrowLeft'?-1:1);
+    return;
+  }
+
+  // Graph-specific shortcuts (only when graph tab is visible)
+  const graphPanel=document.getElementById('panel-graph');
+  if(!graphPanel||graphPanel.style.display==='none')return;
+
+  if(e.key==='Escape'){
+    e.preventDefault();
+    if(_localFocusActive){
+      exitLocalGraph();
+    }else if(_graphMode==='canvas'){
+      setGraphMode('graph');
+    }else if(_orphansHighlighted){
+      toggleOrphans();
+    }
+  }
+  if((e.key==='Delete'||e.key==='Backspace')&&_cy&&_graphMode==='canvas'){
+    const sel=_cy.$(':selected');
+    sel.edges().forEach(edge=>{
+      const eid=edge.data('id');
+      if(eid){
+        api(`/api/graph/edge/${eid}`,{method:'DELETE'}).catch(()=>{});
+        edge.remove();
+      }
+    });
+  }
+});

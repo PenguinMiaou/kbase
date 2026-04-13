@@ -55,8 +55,24 @@ echo python -m kbase.cli %%*
 ) > "%SCRIPT_DIR%kbase.bat"
 echo   Created: %SCRIPT_DIR%kbase.bat
 
+REM Check LibreOffice
+echo [5/6] Checking LibreOffice (for file preview)...
+where soffice >nul 2>&1
+if errorlevel 1 (
+    echo   LibreOffice not found - needed for PPTX/DOCX preview
+    where winget >nul 2>&1
+    if not errorlevel 1 (
+        echo   Installing via winget...
+        winget install --id TheDocumentFoundation.LibreOffice -e --silent
+    ) else (
+        echo   Install manually from: https://www.libreoffice.org/download
+    )
+) else (
+    echo   LibreOffice found
+)
+
 REM Quick test
-echo [5/5] Running quick test...
+echo [6/6] Running quick test...
 python -c "from kbase.store import KBaseStore; print('  All modules OK')"
 
 echo.

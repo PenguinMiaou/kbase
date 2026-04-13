@@ -178,15 +178,15 @@ body {
 }
 .session-title-bar .session-title { pointer-events: auto; }
 .session-title {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 600;
   color: var(--text);
   cursor: pointer;
-  padding: 2px 8px;
-  border-radius: 4px;
+  padding: 4px 12px;
+  border-radius: 6px;
   transition: all 0.15s;
   display: inline-block;
-  max-width: 400px;
+  max-width: 500px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -989,6 +989,13 @@ body {
 .graph-ctx-item:hover { background: var(--accent-light); color: var(--accent); }
 .graph-ctx-item svg { width: 14px; height: 14px; flex-shrink: 0; }
 .graph-ctx-sep { height: 1px; background: var(--border); margin: 4px 0; }
+
+/* Slide loading pulse animation */
+@keyframes slideLoadPulse {
+  0% { width: 20%; margin-left: 0; }
+  50% { width: 60%; margin-left: 20%; }
+  100% { width: 20%; margin-left: 80%; }
+}
 
 /* Responsive */
 @media (max-width: 768px) {

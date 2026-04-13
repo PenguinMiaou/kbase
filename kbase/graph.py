@@ -157,7 +157,8 @@ def get_graph_data(store, edge_types=None, min_score=0.0, file_type=None, source
     params = []
     if file_type:
         query += " AND file_type = ?"
-        params.append(file_type)
+        ft = file_type if file_type.startswith('.') else '.' + file_type
+        params.append(ft)
     if source_dir:
         query += " AND source_dir = ?"
         params.append(source_dir)

@@ -202,8 +202,13 @@ def ingest_directory(
 
 
 def ingest_file(store: KBaseStore, file_path: str, force: bool = False) -> dict:
-    """Ingest a single file."""
+    """Ingest a single file. For mbox files, splits into individual emails."""
     fp = str(Path(file_path).resolve())
+    ext = Path(fp).suffix.lower()
+
+    # Special handling: mbox -> split into individual emails
+    if ext == '.mbox':
+        return _ingest_mbox(store, fp, force)
 
     if not force and store.is_indexed(fp):
         return {"status": "skipped", "file": fp, "reason": "already indexed"}
@@ -228,3 +233,48 @@ def ingest_file(store: KBaseStore, file_path: str, force: bool = False) -> dict:
 
     except Exception as e:
         return {"status": "failed", "file": fp, "error": str(e)}
+
+
+def _ingest_mbox(store: KBaseStore, file_path: str, force: bool = False) -> dict:
+    """Split mbox into individual emails and index each separately."""
+    from kbase.extract import split_mbox
+
+    try:
+        emails = split_mbox(file_path)
+        if not emails:
+            return {"status": "failed", "file": file_path, "error": "No emails found in mbox"}
+
+        indexed = 0
+        for em in emails:
+            # Virtual file path: mbox_path#email_index
+            virtual_path = f"{file_path}#email_{em['email_index']}"
+
+            if not force and store.is_indexed(virtual_path):
+                continue
+
+            chunks = chunk_document(
+                em["text"],
+                file_type=".eml",
+                metadata={
+                    "file_path": virtual_path,
+                    "file_name": em["virtual_name"],
+                    "title": em["metadata"]["title"],
+                },
+            )
+
+            meta = {
+                "type": ".eml",
+                "title": em["metadata"]["title"],
+                "source_mbox": file_path,
+                "email_from": em["metadata"].get("from", ""),
+                "email_to": em["metadata"].get("to", ""),
+                "email_date": em["metadata"].get("date", ""),
+            }
+            store.index_document(virtual_path, em["text"], chunks, [], meta)
+            indexed += 1
+
+        return {"status": "ok", "file": file_path, "chunks": indexed,
+                "message": f"Split into {len(emails)} emails, indexed {indexed}"}
+
+    except Exception as e:
+        return {"status": "failed", "file": file_path, "error": str(e)}

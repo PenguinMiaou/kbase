@@ -61,8 +61,32 @@ echo "  Installing search enhancements (jieba + reranker)..."
 pip install jieba FlagEmbedding -q 2>&1 | tail -3
 echo -e "  ${GREEN}Dependencies installed${NC}"
 
+# Install LibreOffice for file preview (PPTX/DOCX/XLSX -> PDF)
+echo -e "${YELLOW}[4/6] Checking LibreOffice (for file preview)...${NC}"
+if command -v soffice &> /dev/null; then
+    echo -e "  ${GREEN}LibreOffice found${NC}"
+else
+    echo "  LibreOffice not found — needed for PPTX/DOCX preview"
+    if [[ "$(uname)" == "Darwin" ]]; then
+        if command -v brew &> /dev/null; then
+            echo "  Installing via Homebrew (this may take a few minutes)..."
+            brew install --cask libreoffice 2>&1 | tail -3
+            echo -e "  ${GREEN}LibreOffice installed${NC}"
+        else
+            echo -e "  ${YELLOW}Install manually: brew install --cask libreoffice${NC}"
+            echo -e "  ${YELLOW}Or download from: https://www.libreoffice.org/download${NC}"
+        fi
+    elif command -v apt-get &> /dev/null; then
+        echo "  Installing via apt..."
+        sudo apt-get install -y libreoffice-core 2>&1 | tail -3
+        echo -e "  ${GREEN}LibreOffice installed${NC}"
+    else
+        echo -e "  ${YELLOW}Install manually from: https://www.libreoffice.org/download${NC}"
+    fi
+fi
+
 # Create CLI wrapper
-echo -e "${YELLOW}[4/5] Creating CLI shortcut...${NC}"
+echo -e "${YELLOW}[5/6] Creating CLI shortcut...${NC}"
 WRAPPER="$SCRIPT_DIR/kbase-cli"
 cat > "$WRAPPER" << 'WRAPPER_EOF'
 #!/bin/bash
@@ -74,7 +98,7 @@ chmod +x "$WRAPPER"
 echo -e "  ${GREEN}Created: $WRAPPER${NC}"
 
 # Quick test
-echo -e "${YELLOW}[5/5] Running quick test...${NC}"
+echo -e "${YELLOW}[6/6] Running quick test...${NC}"
 python3 -c "from kbase.store import KBaseStore; print('  All modules OK')" 2>/dev/null || echo -e "  ${RED}Module test failed${NC}"
 
 echo ""
