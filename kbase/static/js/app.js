@@ -968,10 +968,25 @@ async function resyncDir(path){
 }
 
 async function browseDir(){
+  // Method 1: Browser File System Access API (Chrome/Edge/Safari 15.2+)
+  if(window.showDirectoryPicker){
+    try{
+      const dirHandle=await window.showDirectoryPicker({mode:'read'});
+      // Browser returns handle, not path. We need the real path.
+      // Unfortunately showDirectoryPicker doesn't expose the full path.
+      // Fall through to method 2.
+    }catch(e){
+      if(e.name==='AbortError')return; // User cancelled
+    }
+  }
+  // Method 2: Backend Tkinter dialog
   try{
     const d=await api('/api/browse-dir');
-    if(d.path){document.getElementById('ingest-path').value=d.path;}
+    if(d.path){document.getElementById('ingest-path').value=d.path;return;}
   }catch(e){}
+  // Method 3: Prompt fallback
+  const p=prompt('Enter directory path / 输入目录路径:','~/Documents');
+  if(p)document.getElementById('ingest-path').value=p;
 }
 
 async function doIngestNew(){

@@ -91,25 +91,61 @@ def create_app(workspace: str = "default") -> FastAPI:
 
     @app.get("/api/browse-dir")
     def api_browse_dir():
-        """Open native directory picker dialog."""
-        import threading, queue as _queue
-        q = _queue.Queue()
-        def pick():
+        """Open native directory picker dialog using the best available method."""
+        import subprocess, platform
+
+        # Method 1: macOS — osascript (works in DMG, no dependencies)
+        if platform.system() == "Darwin":
             try:
-                import tkinter as tk
-                from tkinter import filedialog
-                root = tk.Tk()
-                root.withdraw()
-                root.attributes('-topmost', True)
-                path = filedialog.askdirectory(title="Select folder to index")
-                root.destroy()
-                q.put(path or "")
+                result = subprocess.run(
+                    ["osascript", "-e",
+                     'tell application "System Events" to activate\n'
+                     'set chosenFolder to choose folder with prompt "Select folder to index"\n'
+                     'return POSIX path of chosenFolder'],
+                    capture_output=True, text=True, timeout=120,
+                )
+                path = result.stdout.strip()
+                if path:
+                    return {"path": path}
             except Exception:
-                q.put("")
-        t = threading.Thread(target=pick)
-        t.start()
-        t.join(timeout=120)
-        return {"path": q.get(timeout=1) if not q.empty() else ""}
+                pass
+
+        # Method 2: Linux — zenity
+        if platform.system() == "Linux":
+            try:
+                import shutil
+                if shutil.which("zenity"):
+                    result = subprocess.run(
+                        ["zenity", "--file-selection", "--directory", "--title=Select folder to index"],
+                        capture_output=True, text=True, timeout=120,
+                    )
+                    if result.returncode == 0:
+                        return {"path": result.stdout.strip()}
+            except Exception:
+                pass
+
+        # Method 3: Tkinter fallback
+        try:
+            import threading, queue as _queue
+            q = _queue.Queue()
+            def pick():
+                try:
+                    import tkinter as tk
+                    from tkinter import filedialog
+                    root = tk.Tk()
+                    root.withdraw()
+                    root.attributes('-topmost', True)
+                    path = filedialog.askdirectory(title="Select folder to index")
+                    root.destroy()
+                    q.put(path or "")
+                except Exception:
+                    q.put("")
+            t = threading.Thread(target=pick)
+            t.start()
+            t.join(timeout=120)
+            return {"path": q.get(timeout=1) if not q.empty() else ""}
+        except Exception:
+            return {"path": ""}
 
     @app.post("/api/ingest")
     def api_ingest(directory: str = Form(...), force: bool = Form(False)):
