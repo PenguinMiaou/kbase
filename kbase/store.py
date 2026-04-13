@@ -750,16 +750,34 @@ class KBaseStore:
         except Exception:
             return []
 
-    def sql_query(self, sql: str) -> dict:
-        """Execute SQL query on tabular data."""
+    def sql_query(self, sql: str, max_rows: int = 1000) -> dict:
+        """Execute SQL query on tabular data (SELECT only, row-limited).
+
+        Security: rejects DDL/DML (DROP, DELETE, INSERT, UPDATE, ALTER, CREATE).
+        """
+        # Security: only allow SELECT queries
+        sql_stripped = sql.strip().upper()
+        dangerous = ["DROP ", "DELETE ", "INSERT ", "UPDATE ", "ALTER ", "CREATE ",
+                      "ATTACH ", "DETACH ", "PRAGMA ", "GRANT ", "REVOKE "]
+        if any(sql_stripped.startswith(d) for d in dangerous):
+            return {"columns": [], "rows": [], "error": "Only SELECT queries are allowed"}
+        if not sql_stripped.startswith("SELECT") and not sql_stripped.startswith("WITH"):
+            return {"columns": [], "rows": [], "error": "Only SELECT queries are allowed"}
+
         c = self.conn.cursor()
         try:
             c.execute(sql)
             columns = [desc[0] for desc in c.description] if c.description else []
-            rows = [list(row) for row in c.fetchall()]
-            return {"columns": columns, "rows": rows, "error": None}
+            rows = [list(row) for row in c.fetchmany(max_rows)]
+            truncated = len(rows) >= max_rows
+            return {"columns": columns, "rows": rows, "error": None,
+                    "truncated": truncated, "max_rows": max_rows}
         except Exception as e:
-            return {"columns": [], "rows": [], "error": str(e)}
+            # Security: don't expose internal paths in error messages
+            err_msg = str(e)
+            if "/" in err_msg or "\\" in err_msg:
+                err_msg = "Query execution failed"
+            return {"columns": [], "rows": [], "error": err_msg}
 
     def list_tables(self) -> list[dict]:
         """List all tabular data tables."""

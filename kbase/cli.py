@@ -295,7 +295,7 @@ def open_file(ctx, query):
 
 
 @main.command()
-@click.option("--host", default="0.0.0.0")
+@click.option("--host", default="127.0.0.1", help="Bind address (127.0.0.1=local only, 0.0.0.0=network)")
 @click.option("--port", "-p", default=8765)
 @click.pass_context
 def web(ctx, host, port):

@@ -47,8 +47,66 @@ function _handleSync(msg){
 }
 
 // === Utility ===
-async function api(url,opts){const r=await fetch(API+url,opts);return r.json();}
+async function api(url,opts,retries=2){
+  for(let attempt=0;attempt<=retries;attempt++){
+    try{
+      const r=await fetch(API+url,opts);
+      if(!r.ok&&r.status>=500&&attempt<retries){await new Promise(r=>setTimeout(r,1000));continue;}
+      _setConnected(true);
+      return r.json();
+    }catch(e){
+      if(attempt<retries){await new Promise(r=>setTimeout(r,1500));continue;}
+      _setConnected(false);
+      throw e;
+    }
+  }
+}
 function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+// === Connection monitor: auto-detect disconnect + reconnect ===
+let _connected=true;
+let _reconnectTimer=null;
+function _setConnected(ok){
+  if(ok&&!_connected){
+    _connected=true;
+    const banner=document.getElementById('conn-banner');
+    if(banner)banner.style.display='none';
+    // Refresh state after reconnect (retry once after brief delay)
+    loadStats().catch(()=>setTimeout(loadStats,2000));
+    loadConvList();
+  }
+  _connected=ok;
+  if(!ok&&!_reconnectTimer){
+    // Show banner
+    let banner=document.getElementById('conn-banner');
+    if(!banner){
+      banner=document.createElement('div');
+      banner.id='conn-banner';
+      banner.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:#ef4444;color:#fff;text-align:center;padding:8px;font-size:13px;display:none;';
+      document.body.prepend(banner);
+    }
+    banner.innerHTML='Connection lost. Reconnecting...';
+    banner.style.display='block';
+    // Auto-retry every 3s
+    _reconnectTimer=setInterval(async()=>{
+      try{
+        const r=await fetch(API+'/api/version');
+        if(r.ok){
+          clearInterval(_reconnectTimer);
+          _reconnectTimer=null;
+          _setConnected(true);
+        }
+      }catch(_){}
+    },3000);
+  }
+}
+// Detect wake from sleep (laptop open)
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden){
+    // Page became visible — check connection
+    fetch(API+'/api/version').then(r=>{if(r.ok)_setConnected(true);}).catch(()=>_setConnected(false));
+  }
+});
 
 // === Init with loading screen ===
 (async()=>{
@@ -102,13 +160,17 @@ function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replac
 })();
 
 async function loadStats(){
-  const s=await api('/api/status');
-  document.getElementById('s-files').textContent=s.file_count||0;
-  document.getElementById('s-chunks').textContent=s.chunk_count||0;
-  document.getElementById('s-tables').textContent=s.table_count||0;
-  document.getElementById('s-errors').textContent=s.error_count||0;
-  document.getElementById('welcome-stats').textContent=
-    `${s.file_count} files | ${s.chunk_count} chunks | ${s.table_count} tables indexed`;
+  try{
+    const s=await api('/api/status');
+    document.getElementById('s-files').textContent=s.file_count||0;
+    document.getElementById('s-chunks').textContent=s.chunk_count||0;
+    document.getElementById('s-tables').textContent=s.table_count||0;
+    document.getElementById('s-errors').textContent=s.error_count||0;
+    document.getElementById('welcome-stats').textContent=
+      `${s.file_count} files | ${s.chunk_count} chunks | ${s.table_count} tables indexed`;
+  }catch(e){
+    // Keep previous values, don't blank out
+  }
 }
 
 async function loadSettings(){
@@ -496,6 +558,7 @@ function renderMarkdown(text,sources){
 }
 
 function lnk(t,sources){
+  // Security: $1 is already esc()'d from renderMarkdown, safe for innerHTML
   t=t.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
   t=t.replace(/`([^`]+)`/g,'<code>$1</code>');
   t=t.replace(/\[([^\]]+)\]/g,(m,ref)=>{
@@ -1124,25 +1187,30 @@ async function removeDir(path){
     ?`确定移除 "${path}" 及其所有已索引文件？\n(不会删除原始文件，只从索引中清除)`
     :`Remove "${path}" and all its indexed files from KBase?\n(Original files will NOT be deleted)`;
   if(!confirm(msg))return;
-  // Immediately remove from UI (don't wait for backend)
+  // Immediately remove from DOM (don't wait for backend)
+  const dirList=document.getElementById('ingest-dir-list');
+  if(dirList){
+    dirList.querySelectorAll('div[style*="border"]').forEach(el=>{
+      if(el.textContent.includes(path.split('/').pop()))el.remove();
+    });
+    if(!dirList.children.length)dirList.innerHTML='<p style="color:var(--text-muted);font-size:13px;">No directories synced yet. Add one below.</p>';
+  }
   const el=document.getElementById('ingest-result');
   if(el)el.innerHTML='';
-  loadIngestDirs(); // will re-render without the deleted dir after settings update
-  // Backend cleanup in background
+  // Stop any running ingest, then cleanup in background
   try{await api('/api/ingest/stop',{method:'POST'});}catch(e){}
-  api('/api/ingest-dirs/remove',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({path:path})}).then(r=>{
-    loadStats();loadIngestDirs();
-  }).catch(()=>{});
+  try{
+    await api('/api/ingest-dirs/remove',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:path})});
+  }catch(e){}
+  loadStats();loadIngestDirs();
 }
 
-async function resyncDir(path){
-  const el=document.getElementById('ingest-result');
-  el.innerHTML='<p style="color:var(--yellow)">Re-syncing...</p>';
-  const form=new FormData();form.append('directory',path);form.append('force','false');
-  const d=await api('/api/ingest',{method:'POST',body:form});
-  el.innerHTML=`<div style="border:1px solid var(--border);border-radius:8px;padding:12px;"><span style="color:var(--green)">Done ${d.elapsed_seconds||'?'}s</span> — Processed: ${d.processed||0} | Skipped: ${d.skipped||0}</div>`;
-  loadStats();loadIngestDirs();
+function resyncDir(path){
+  // Reuse the same SSE progress bar as doIngestNew
+  document.getElementById('ingest-path').value=path;
+  document.getElementById('ingest-force').checked=false;
+  doIngestNew();
 }
 
 async function browseDir(){

@@ -80,9 +80,49 @@ def _auto_save_research(report: str, question: str, workspace: str, settings: di
         save_settings(workspace, settings)
 
 
+def _validate_file_path(file_path: str, store=None) -> str:
+    """Security: validate file path is within allowed directories.
+
+    Prevents path traversal attacks. Only allows:
+    - Files registered in the DB (indexed files)
+    - Files under user's home directory
+    - Temp files (for slides/conversion cache)
+    """
+    import tempfile
+    resolved = str(Path(file_path).resolve())
+    allowed_roots = [
+        str(Path.home()),
+        tempfile.gettempdir(),
+        str(Path.home() / ".kbase"),
+    ]
+    if not any(resolved.startswith(root) for root in allowed_roots):
+        raise HTTPException(403, "Access denied: path outside allowed directories")
+    # Block access to sensitive files
+    sensitive = [".ssh", ".gnupg", ".aws", "credentials", ".env", "id_rsa", "shadow"]
+    path_lower = resolved.lower()
+    if any(s in path_lower for s in sensitive):
+        raise HTTPException(403, "Access denied: sensitive file")
+    return resolved
+
+
+def _sanitize_filename(filename: str) -> str:
+    """Security: sanitize uploaded filename to prevent path injection."""
+    # Remove path separators and null bytes
+    name = filename.replace("/", "_").replace("\\", "_").replace("\x00", "")
+    # Keep only safe characters
+    name = "".join(c for c in name if c.isalnum() or c in ".-_ ()")
+    return name[:200] or "upload"
+
+
 def create_app(workspace: str = "default") -> FastAPI:
     app = FastAPI(title="KBase", description="Local Knowledge Base API")
-    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+    # Security: restrict CORS to localhost only (not open to all origins)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:8765", "http://127.0.0.1:8765", "http://localhost:*", "http://127.0.0.1:*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # Static files for logos
     static_dir = Path(__file__).parent / "static"
@@ -252,21 +292,35 @@ def create_app(workspace: str = "default") -> FastAPI:
     @app.get("/api/ingest-stream")
     def api_ingest_stream(directory: str = Query(...), force: bool = Query(False)):
         """SSE endpoint for real-time ingest progress."""
+        # Security: validate ingest directory is under user's home
+        resolved = str(Path(directory).resolve())
+        home = str(Path.home())
+        if not resolved.startswith(home):
+            raise HTTPException(403, "Can only ingest directories under your home folder")
+
         import queue, threading
         q = queue.Queue()
 
         def do_ingest():
             store = get_store()
             try:
-                def cb(current, total, name, status):
-                    q.put(json.dumps({"current": current, "total": total, "name": name, "status": status}))
-                stats = ingest_directory(store, directory, force=force, progress_callback=cb)
-                # Track directory in settings
+                # Track directory in settings IMMEDIATELY (not after completion)
+                # so it persists even if ingest is paused/interrupted
                 settings_data = load_settings(workspace)
                 dirs = settings_data.setdefault("ingest_dirs", {})
                 if isinstance(dirs, list):
                     dirs = {d: {"enabled": True} for d in dirs if isinstance(d, str)}
                     settings_data["ingest_dirs"] = dirs
+                if directory not in dirs:
+                    dirs[directory] = {"enabled": True, "last_sync": 0, "file_count": 0, "status": "ingesting"}
+                save_settings(workspace, settings_data)
+
+                def cb(current, total, name, status):
+                    q.put(json.dumps({"current": current, "total": total, "name": name, "status": status}))
+                stats = ingest_directory(store, directory, force=force, progress_callback=cb)
+                # Update directory status on completion
+                settings_data = load_settings(workspace)
+                dirs = settings_data.setdefault("ingest_dirs", {})
                 dirs[directory] = {
                     "enabled": True,
                     "last_sync": time.time(),
@@ -294,10 +348,33 @@ def create_app(workspace: str = "default") -> FastAPI:
 
     @app.post("/api/add")
     async def api_add_file(file: UploadFile = File(...)):
+        from kbase.config import SUPPORTED_EXTENSIONS
+        # Security: validate file extension
+        ext = Path(file.filename).suffix.lower()
+        if ext not in SUPPORTED_EXTENSIONS:
+            raise HTTPException(400, f"File type '{ext}' not supported. Allowed: {', '.join(sorted(SUPPORTED_EXTENSIONS))}")
+        # Security: enforce size limit (500MB)
+        MAX_UPLOAD_SIZE = 500 * 1024 * 1024
+        content = await file.read()
+        if len(content) > MAX_UPLOAD_SIZE:
+            raise HTTPException(413, f"File too large ({len(content) // 1024 // 1024}MB). Max: 500MB")
+        # Security: sanitize filename
+        safe_name = _sanitize_filename(file.filename)
+        if not Path(safe_name).suffix:
+            safe_name += ext  # Ensure extension preserved
         upload_dir = Path.home() / ".kbase" / workspace / "uploads"
         upload_dir.mkdir(parents=True, exist_ok=True)
-        dest = upload_dir / file.filename
-        dest.write_bytes(await file.read())
+        # Security: atomic write via temp file (M10)
+        import tempfile
+        tmp = tempfile.NamedTemporaryFile(dir=str(upload_dir), suffix=ext, delete=False)
+        try:
+            tmp.write(content)
+            tmp.close()
+            dest = upload_dir / safe_name
+            os.rename(tmp.name, str(dest))
+        except Exception:
+            os.unlink(tmp.name)
+            raise
         store = get_store()
         try:
             return ingest_file(store, str(dest), force=True)
@@ -387,41 +464,50 @@ def create_app(workspace: str = "default") -> FastAPI:
 
     @app.post("/api/ingest-dirs/remove")
     async def api_remove_ingest_dir(request: Request):
-        """Remove a directory and all its files from the index."""
+        """Remove a directory and all its files from the index.
+        Responds immediately after removing from settings, cleans DB in background."""
         body = await request.json()
         path = body.get("path", "")
         if not path:
             raise HTTPException(400, "No path provided")
-        store = get_store()
-        c = store.conn.cursor()
-        # Find all files matching this directory (by source_dir or file_path prefix)
-        c.execute("""SELECT file_id, file_path FROM files
-                     WHERE source_dir = ? OR file_path LIKE ? OR source_dir LIKE ?""",
-                  (path, path + "%", path + "%"))
-        files = c.fetchall()
-        removed = 0
-        file_ids = []
-        for f in files:
-            try:
-                file_ids.append(f["file_id"])
-                store.remove_file(f["file_path"])
-                removed += 1
-            except Exception:
-                pass
-        # Also clean up graph edges for removed files
-        if file_ids:
-            placeholders = ",".join("?" * len(file_ids))
-            c.execute(f"DELETE FROM document_edges WHERE source_file_id IN ({placeholders}) OR target_file_id IN ({placeholders})",
-                      file_ids + file_ids)
-            c.execute(f"DELETE FROM graph_node_positions WHERE file_id IN ({placeholders})", file_ids)
-            store.conn.commit()
-        # Remove from settings
+
+        # Step 1: Remove from settings IMMEDIATELY (fast, <1ms)
         settings_data = load_settings(workspace)
         dirs = settings_data.get("ingest_dirs", {})
         if path in dirs:
             del dirs[path]
             save_settings(workspace, settings_data)
-        return {"status": "ok", "removed_files": removed, "path": path}
+
+        # Step 2: Clean DB in background thread (slow, but user doesn't wait)
+        import threading
+        def _cleanup():
+            store = get_store()
+            try:
+                c = store.conn.cursor()
+                c.execute("""SELECT file_id, file_path FROM files
+                             WHERE source_dir = ? OR file_path LIKE ? OR source_dir LIKE ?""",
+                          (path, path + "%", path + "%"))
+                files = c.fetchall()
+                for f in files:
+                    try:
+                        store.remove_file(f["file_path"])
+                    except Exception:
+                        pass
+                # Clean graph edges
+                file_ids = [f["file_id"] for f in files]
+                if file_ids:
+                    ph = ",".join("?" * len(file_ids))
+                    c.execute(f"DELETE FROM document_edges WHERE source_file_id IN ({ph}) OR target_file_id IN ({ph})", file_ids + file_ids)
+                    c.execute(f"DELETE FROM graph_node_positions WHERE file_id IN ({ph})", file_ids)
+                    store.conn.commit()
+                print(f"[KBase] Cleaned {len(files)} files from '{path}'")
+            except Exception as e:
+                print(f"[KBase] Cleanup error: {e}")
+            finally:
+                store.close()
+        threading.Thread(target=_cleanup, daemon=True).start()
+
+        return {"status": "ok", "path": path}
 
     # ---- Natural Language SQL API ----
 
@@ -1024,7 +1110,7 @@ del "%~f0" >nul 2>&1
         row = c.fetchone()
         if not row:
             raise HTTPException(404, "File not found")
-        file_path = row["file_path"]
+        file_path = _validate_file_path(row["file_path"])
         if not os.path.isfile(file_path):
             raise HTTPException(404, "File no longer exists on disk")
         mime_map = {
@@ -1053,7 +1139,7 @@ del "%~f0" >nul 2>&1
         row = c.fetchone()
         if not row:
             raise HTTPException(404, "File not found")
-        file_path = row["file_path"]
+        file_path = _validate_file_path(row["file_path"])
         if not os.path.isfile(file_path):
             raise HTTPException(404, "File no longer exists")
 
@@ -1747,11 +1833,11 @@ del "%~f0" >nul 2>&1
     @app.post("/api/open-file")
     async def api_open_file(request: Request):
         body = await request.json()
-        file_path = body.get("path", "")
+        file_path = _validate_file_path(body.get("path", ""))
         page = body.get("page", 0)
         slide = body.get("slide", 0)
         if not file_path or not Path(file_path).exists():
-            raise HTTPException(404, f"File not found: {file_path}")
+            raise HTTPException(404, "File not found")
         system = platform.system()
         ext = Path(file_path).suffix.lower()
         try:
@@ -1851,9 +1937,16 @@ print(path)
     @app.get("/api/settings")
     def api_get_settings():
         settings = load_settings(workspace)
+        # Security: mask API keys in response (show last 4 chars only)
+        masked = dict(settings)
+        for key in list(masked.keys()):
+            if "api_key" in key.lower() or "secret" in key.lower():
+                val = masked[key]
+                if isinstance(val, str) and len(val) > 8:
+                    masked[key] = "***" + val[-4:]
         from kbase.config import VISION_MODELS
         return {
-            "settings": settings,
+            "settings": masked,
             "embedding_models": EMBEDDING_MODELS,
             "whisper_models": WHISPER_MODELS,
             "vision_models": VISION_MODELS,
@@ -1867,6 +1960,12 @@ print(path)
     async def api_save_settings(request: Request):
         body = await request.json()
         current = load_settings(workspace)
+        # Security: don't overwrite real API keys with masked values (***xxxx)
+        for key in list(body.keys()):
+            if ("api_key" in key.lower() or "secret" in key.lower()):
+                val = body[key]
+                if isinstance(val, str) and val.startswith("***"):
+                    del body[key]  # Keep the existing real key
         current.update(body)
         save_settings(workspace, current)
         return {"status": "saved", "settings": current}
