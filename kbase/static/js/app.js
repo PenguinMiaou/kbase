@@ -1152,9 +1152,9 @@ async function doIngestNew(){
     <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;">
       <div id="ingest-bar" style="height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width 0.3s;"></div>
     </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
-      <div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;height:16px;" id="ingest-file"></div>
-      <div style="display:flex;gap:4px;" id="ingest-controls">
+    <div style="display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;margin-top:6px;height:24px;">
+      <div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="ingest-file"></div>
+      <div style="display:flex;gap:4px;flex-shrink:0;" id="ingest-controls">
         <button onclick="toggleIngestPause()" id="ingest-pause-btn" style="padding:3px 10px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--card);color:var(--text);cursor:pointer;">Pause</button>
         <button onclick="stopIngest()" style="padding:3px 10px;font-size:11px;border:1px solid var(--red,#dc2626);border-radius:5px;background:none;color:var(--red,#dc2626);cursor:pointer;">Stop</button>
       </div>
