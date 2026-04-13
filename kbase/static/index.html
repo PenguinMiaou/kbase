@@ -264,42 +264,42 @@
 
     <div class="tab-panel" id="panel-settings" style="display:none;flex:1;padding:24px;overflow-y:auto;">
       <div style="max-width:800px;margin:0 auto;">
-        <h2 style="margin-bottom:20px;">Settings</h2>
+        <h2 style="margin-bottom:20px;" data-i18n="settings">Settings</h2>
 
         <!-- LLM Provider -->
         <div style="border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;">
-          <h3 style="margin-bottom:4px;">LLM Provider</h3>
-          <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Select model, then configure API key below</p>
+          <h3 style="margin-bottom:4px;" data-i18n="set_llm">LLM Provider</h3>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;" data-i18n="set_llm_desc">Select model, then configure API key below</p>
           <div id="set-llm-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;"></div>
           <div id="set-llm-cfg" style="display:none;margin-top:12px;padding:12px;border:1px solid var(--accent);border-radius:8px;background:var(--accent-light);"></div>
         </div>
 
         <!-- Embedding -->
         <div style="border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;">
-          <h3 style="margin-bottom:4px;">Embedding Model</h3>
-          <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Change requires re-ingest</p>
+          <h3 style="margin-bottom:4px;" data-i18n="set_emb">Embedding Model</h3>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;" data-i18n="set_emb_desc">Change requires re-ingest</p>
           <div id="set-emb-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;"></div>
           <div id="set-emb-cfg" style="display:none;margin-top:12px;padding:12px;border:1px solid var(--accent);border-radius:8px;background:var(--accent-light);"></div>
         </div>
 
         <!-- Whisper -->
         <div style="border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;">
-          <h3 style="margin-bottom:4px;">Whisper (ASR)</h3>
-          <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Select ASR model for audio transcription</p>
+          <h3 style="margin-bottom:4px;" data-i18n="set_whisper">Whisper (ASR)</h3>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;" data-i18n="set_whisper_desc">Select ASR model for audio transcription</p>
           <div id="set-whi-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;"></div>
           <div id="set-whi-cfg" style="display:none;margin-top:12px;padding:12px;border:1px solid var(--accent);border-radius:8px;background:var(--accent-light);"></div>
         </div>
 
         <!-- Language Profile -->
         <div style="border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;">
-          <h3 style="margin-bottom:4px;">Language Profile</h3>
-          <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Optimizes search segmentation, synonym expansion, and recommended embedding model</p>
+          <h3 style="margin-bottom:4px;" data-i18n="set_lang">Language Profile</h3>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;" data-i18n="set_lang_desc">Optimizes search segmentation and synonym expansion</p>
           <div id="set-lang-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;"></div>
         </div>
 
         <!-- Chunk & Search & Memory -->
         <div style="border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;">
-          <h3 style="margin-bottom:12px;">Chunk, Search & Memory</h3>
+          <h3 style="margin-bottom:12px;" data-i18n="set_chunk">Chunk, Search & Memory</h3>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;">
             <div><label style="font-size:12px;color:var(--text-dim);">Chunk Max Size</label>
               <input id="set-chunk-max" type="number" value="1500" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);margin-top:4px;">
@@ -332,14 +332,14 @@
 
         <!-- Buddy -->
         <div style="border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;">
-          <h3 style="margin-bottom:8px;">Buddy Preset</h3>
+          <h3 style="margin-bottom:8px;" data-i18n="set_buddy">Buddy Preset</h3>
           <div id="set-buddy-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;"></div>
         </div>
 
         <!-- Global Memory -->
         <div style="border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;">
-          <h3 style="margin-bottom:4px;">Global Memory</h3>
-          <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">KBase remembers key facts across conversations to give better answers over time.</p>
+          <h3 style="margin-bottom:4px;" data-i18n="set_memory">Global Memory</h3>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;" data-i18n="set_memory_desc">KBase remembers key facts across conversations.</p>
           <div id="set-memory-list" style="max-height:300px;overflow-y:auto;margin-bottom:12px;"></div>
           <div style="display:flex;gap:8px;">
             <input id="memory-new-input" type="text" placeholder="Add a memory manually... / 手动添加记忆..." style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:13px;outline:none;">

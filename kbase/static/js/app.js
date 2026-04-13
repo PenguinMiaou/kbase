@@ -1630,6 +1630,18 @@ const I18N={
     checkUpdate:'检查更新',upToDate:'已是最新版本',updateAvailable:'有新版本可用',
     shutdown:'关闭 KBase',shutdownConfirm:'确定关闭 KBase？',
     stopped:'已停止',removed:'已清理',
+    // Settings
+    set_llm:'对话模型',set_llm_desc:'选择模型，然后配置 API Key',
+    set_emb:'Embedding 模型',set_emb_desc:'切换后需重新导入索引',
+    set_whisper:'语音识别 (ASR)',set_whisper_desc:'选择语音转文字模型',
+    set_lang:'语言配置',set_lang_desc:'优化分词和同义词扩展',
+    set_chunk:'分块、搜索与记忆',
+    set_buddy:'助手预设',
+    set_memory:'全局记忆',set_memory_desc:'KBase 会记住关键事实，持续优化回答',
+    chunkMax:'分块大小',chunkOverlap:'重叠长度',memoryTurns:'记忆轮数',
+    topK:'搜索结果数',reranking:'重排序',timeDecay:'时间衰减',
+    charsPerChunk:'每块字符数',overlapBetween:'块间重叠',convDepth:'对话记忆深度',
+    resultsPerSearch:'每次搜索返回数',crossEncoder:'交叉编码器重排',boostRecent:'提升新文档排名',
   },
   en:{
     newChat:'New Chat',chat:'Chat',search:'Search',sql:'SQL',files:'Files',ingest:'Ingest',
@@ -1649,11 +1661,29 @@ const I18N={
     checkUpdate:'Check for Updates',upToDate:'Up to date',updateAvailable:'Update available',
     shutdown:'Shutdown KBase',shutdownConfirm:'Shutdown KBase?',
     stopped:'Stopped',removed:'Cleaned up',
+    // Settings
+    set_llm:'LLM Provider',set_llm_desc:'Select model, then configure API key below',
+    set_emb:'Embedding Model',set_emb_desc:'Change requires re-ingest',
+    set_whisper:'Whisper (ASR)',set_whisper_desc:'Select ASR model for audio transcription',
+    set_lang:'Language Profile',set_lang_desc:'Optimizes segmentation and synonym expansion',
+    set_chunk:'Chunk, Search & Memory',
+    set_buddy:'Buddy Preset',
+    set_memory:'Global Memory',set_memory_desc:'KBase remembers key facts across conversations.',
+    chunkMax:'Chunk Max Size',chunkOverlap:'Chunk Overlap',memoryTurns:'Memory Turns',
+    topK:'Search Top-K',reranking:'Re-ranking',timeDecay:'Time Decay',
+    charsPerChunk:'Characters per chunk',overlapBetween:'Overlap between chunks',convDepth:'Conversation history depth',
+    resultsPerSearch:'Results per search',crossEncoder:'Cross-encoder rerank',boostRecent:'Boost recent documents',
   },
 };
 function t(key){return (I18N[curLang]||I18N.en)[key]||key;}
 
 function applyI18n(){
+  // Universal data-i18n attribute translation
+  document.querySelectorAll('[data-i18n]').forEach(el=>{
+    const key=el.dataset.i18n;
+    const val=t(key);
+    if(val&&val!==key)el.textContent=val;
+  });
   // Sidebar tabs
   const tabLabels={chat:t('chat'),search:t('search'),sql:t('sql'),files:t('files'),ingest:t('ingest'),connectors:t('connectors'),settings:t('settings')};
   document.querySelectorAll('.nav-tab[data-tab]').forEach(tab=>{
