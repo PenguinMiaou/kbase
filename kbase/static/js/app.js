@@ -1574,14 +1574,29 @@ async function loadMemoryList(){
   try{
     const d=await api('/api/memories');
     const mems=d.memories||[];
-    if(!mems.length){el.innerHTML='<p style="font-size:12px;color:var(--text-muted);">No memories yet. KBase will learn from your conversations over time.</p>';return;}
-    el.innerHTML=mems.map(m=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;">
-      <span style="flex:1;color:var(--text);">${esc(m.content)}</span>
-      <span style="font-size:10px;color:var(--text-muted);white-space:nowrap;">${m.source==='manual'?'Manual':m.created_at||''}</span>
-      <button onclick="deleteMemory('${m.id}')" style="background:none;border:none;cursor:pointer;color:var(--text-muted);padding:2px;" title="Delete">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-      </button>
-    </div>`).join('');
+    if(!mems.length){el.innerHTML=`<div style="text-align:center;padding:20px;color:var(--text-muted);">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto 8px;display:block;opacity:0.5;"><path d="M12 2a7 7 0 017 7c0 3-2 5.5-3 7l-1 3H9l-1-3c-1-1.5-3-4-3-7a7 7 0 017-7z"/><path d="M9 19h6M10 22h4"/></svg>
+      <p style="font-size:12px;">${curLang==='zh'?'暂无记忆。KBase 会在对话中自动学习':'No memories yet. KBase learns from conversations.'}</p>
+    </div>`;return;}
+    el.innerHTML=mems.map(m=>{
+      const icon=m.source==='manual'
+        ?'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'
+        :'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 017 7c0 3-2 5.5-3 7l-1 3H9l-1-3c-1-1.5-3-4-3-7a7 7 0 017-7z"/></svg>';
+      const label=m.source==='manual'?(curLang==='zh'?'手动':'Manual'):(curLang==='zh'?'自动提取':'Auto');
+      const time=m.created_at?new Date(m.created_at).toLocaleDateString():'';
+      return `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;transition:border-color 0.15s;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+        <div style="flex-shrink:0;width:24px;height:24px;border-radius:6px;background:var(--accent-light);display:flex;align-items:center;justify-content:center;color:var(--accent);margin-top:1px;">${icon}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;color:var(--text);line-height:1.5;word-break:break-word;">${esc(m.content)}</div>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:3px;display:flex;gap:8px;">
+            <span>${label}</span>${time?`<span>${time}</span>`:''}
+          </div>
+        </div>
+        <button onclick="deleteMemory('${m.id}')" style="flex-shrink:0;background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;border-radius:4px;transition:color 0.15s;" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--text-muted)'" title="${curLang==='zh'?'删除':'Delete'}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/></svg>
+        </button>
+      </div>`;
+    }).join('');
   }catch(e){el.innerHTML='<p style="color:var(--red);font-size:12px;">Error loading memories</p>';}
 }
 
