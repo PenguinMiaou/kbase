@@ -154,7 +154,72 @@ def expand_query(query: str) -> str:
 
 
 # ============================================================
-# 3. Re-ranking with Cross-Encoder
+# 3. HyDE — Hypothetical Document Embedding
+# ============================================================
+
+def generate_hyde(query: str, llm_func=None) -> str:
+    """Generate a hypothetical document that would answer the query.
+
+    HyDE (Gao et al. 2022): instead of embedding the short query,
+    we generate a hypothetical answer and embed THAT — the embedding
+    of a document-like text matches real documents much better than
+    a short query embedding.
+
+    Args:
+        query: User's search query
+        llm_func: Callable that takes (prompt) → str. If None, returns query unchanged.
+    """
+    if not llm_func:
+        return query
+
+    prompt = f"""Please write a short paragraph (100-200 words) that would be a good answer to this question.
+Write it as if it's an excerpt from a real document. Include specific details, numbers, and terminology.
+Do NOT say "I don't know" or ask clarifying questions. Just write the hypothetical document content.
+
+Question: {query}
+
+Hypothetical document excerpt:"""
+
+    try:
+        hyde_doc = llm_func(prompt)
+        if hyde_doc and len(hyde_doc) > 20:
+            return hyde_doc[:500]  # Truncate to reasonable embedding length
+    except Exception:
+        pass
+    return query
+
+
+# ============================================================
+# 4. Multi-Query Expansion (LLM-powered)
+# ============================================================
+
+def generate_multi_queries(query: str, llm_func=None, n: int = 3) -> list[str]:
+    """Generate multiple search queries from different angles.
+
+    Inspired by RAG-Fusion: generate diverse queries to cover
+    different aspects and phrasings of the user's intent.
+    """
+    if not llm_func:
+        return [query]
+
+    prompt = f"""Generate {n} different search queries for finding documents related to this question.
+Each query should approach the topic from a different angle or use different keywords.
+Output ONLY the queries, one per line. No numbering, no explanation.
+
+Original question: {query}
+
+Alternative queries:"""
+
+    try:
+        result = llm_func(prompt)
+        queries = [q.strip() for q in result.strip().split("\n") if q.strip() and len(q.strip()) > 3]
+        return [query] + queries[:n]
+    except Exception:
+        return [query]
+
+
+# ============================================================
+# 5. Re-ranking with Cross-Encoder
 # ============================================================
 
 _reranker = None

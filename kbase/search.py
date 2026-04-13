@@ -5,27 +5,50 @@ import math
 import re
 import time
 from difflib import SequenceMatcher
+from pathlib import Path
 from typing import Optional
 
 from kbase.store import KBaseStore
-from kbase.enhance import expand_query, rerank_results, segment_text
+from kbase.enhance import expand_query, rerank_results, segment_text, generate_hyde, generate_multi_queries
 
 
 def hybrid_search(store: KBaseStore, query: str, top_k: int = 10,
                   use_rerank: bool = True, use_expand: bool = True,
                   file_type: str = None, time_decay: bool = True,
-                  dedup: bool = True, recursive: bool = True) -> dict:
-    """Full-pipeline enhanced search."""
+                  dedup: bool = True, recursive: bool = True,
+                  llm_func=None) -> dict:
+    """Full-pipeline enhanced search with HyDE + Multi-Query + Parent retrieval.
+
+    Pipeline: expand → HyDE → multi-query → retrieve → fuse → dedup → rerank → parent-expand
+    """
     methods = ["semantic", "keyword"]
 
-    # 1. Query expansion
+    # 1. Query expansion (synonym-based)
     expanded = expand_query(query) if use_expand else query
     if expanded != query:
         methods.append("expanded")
 
+    # 1b. HyDE — generate hypothetical document for better embedding match
+    hyde_query = generate_hyde(query, llm_func=llm_func)
+    if hyde_query != query:
+        methods.append("hyde")
+
+    # 1c. Multi-Query — search from multiple angles
+    multi_queries = generate_multi_queries(query, llm_func=llm_func, n=2)
+    if len(multi_queries) > 1:
+        methods.append(f"multi-query({len(multi_queries)})")
+
     # 2. Multi-path retrieval (over-fetch aggressively for better recall)
     fetch_k = max(top_k * 5, 50)
+
+    # Semantic: original query + HyDE + multi-queries
     semantic_results = store.semantic_search(query, top_k=fetch_k, file_type=file_type)
+    if hyde_query != query:
+        hyde_results = store.semantic_search(hyde_query, top_k=fetch_k, file_type=file_type)
+        semantic_results = _dedupe_merge(semantic_results, hyde_results)
+    for mq in multi_queries[1:]:  # Skip first (original query)
+        mq_results = store.semantic_search(mq, top_k=fetch_k // 2, file_type=file_type)
+        semantic_results = _dedupe_merge(semantic_results, mq_results)
     if expanded != query:
         semantic_expanded = store.semantic_search(expanded, top_k=fetch_k, file_type=file_type)
         semantic_results = _dedupe_merge(semantic_results, semantic_expanded)
@@ -76,7 +99,12 @@ def hybrid_search(store: KBaseStore, query: str, top_k: int = 10,
                 fused.extend(extra[:top_k - len(fused)])
                 methods.append("recursive")
 
-    # 8. Directory priority (archive penalty, active boost)
+    # 8. Parent chunk expansion — replace child chunks with parent context where available
+    fused = _expand_to_parents(store, fused)
+    if any(r.get("parent_expanded") for r in fused):
+        methods.append("parent-expand")
+
+    # 9. Directory priority (archive penalty, active boost)
     fused = _apply_directory_priority(fused)
     methods.append("dir-priority")
 
@@ -260,6 +288,47 @@ def _rrf_merge(list_a: list[dict], list_b: list[dict], k: int = 60) -> list[dict
             items[cid] = {**item, "method": "hybrid"}
     sorted_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
     return [{**items[cid], "rrf_score": scores[cid]} for cid in sorted_ids]
+
+
+def _expand_to_parents(store: KBaseStore, results: list) -> list:
+    """Replace child chunks with their parent chunk text for richer LLM context.
+
+    When a child chunk matches, find its parent (larger chunk containing more context)
+    and use the parent text instead. This gives the LLM more surrounding context.
+    """
+    if not results:
+        return results
+
+    for r in results:
+        meta = r.get("metadata", {})
+        if meta.get("is_parent"):
+            continue  # Already a parent
+
+        file_path = meta.get("file_path", "")
+        if not file_path:
+            continue
+
+        # Look for a parent chunk from same file
+        try:
+            # Search for parent chunks from the same file
+            parent_results = store.keyword_search(
+                f'"{Path(file_path).name}"',
+                top_k=5,
+            )
+            for pr in parent_results:
+                pr_meta = pr.get("metadata", {})
+                if (pr_meta.get("is_parent") and
+                    pr_meta.get("file_path") == file_path and
+                    len(pr.get("text", "")) > len(r.get("text", ""))):
+                    # Found parent with more context — use its text
+                    r["text_original"] = r["text"]  # Keep original for highlighting
+                    r["text"] = pr["text"]
+                    r["parent_expanded"] = True
+                    break
+        except Exception:
+            pass
+
+    return results
 
 
 def _detect_table_query(query: str) -> Optional[str]:

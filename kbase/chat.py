@@ -340,7 +340,13 @@ def chat(store: KBaseStore, question: str, settings: dict = None,
 
     # KB search (for kb, hybrid, research modes)
     if search_mode in ("kb", "hybrid", "research"):
-        search_result = hybrid_search(store, search_query, top_k=max(top_k, 15))
+        # Create lightweight LLM func for HyDE/Multi-Query (optional, enhances search)
+        def _search_llm(prompt):
+            try:
+                return _call_llm(provider, [{"role": "user", "content": prompt}], "", settings)
+            except Exception:
+                return ""
+        search_result = hybrid_search(store, search_query, top_k=max(top_k, 15), llm_func=_search_llm)
         for i, r in enumerate(search_result.get("results", [])):
             meta = r.get("metadata", {})
             fname = meta.get("file_name", "unknown")
