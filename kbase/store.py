@@ -196,12 +196,16 @@ class KBaseStore:
         return hashlib.md5(file_path.encode()).hexdigest()
 
     def is_indexed(self, file_path: str) -> bool:
-        """Check if file is already indexed and up-to-date."""
+        """Check if file is already indexed and up-to-date.
+        Files with errors are NOT considered indexed (will be retried)."""
         fid = self.file_id(file_path)
         c = self.conn.cursor()
-        c.execute("SELECT modified_time FROM files WHERE file_id = ?", (fid,))
+        c.execute("SELECT modified_time, error FROM files WHERE file_id = ?", (fid,))
         row = c.fetchone()
         if not row:
+            return False
+        # If previous attempt had error, retry
+        if row["error"]:
             return False
         try:
             current_mtime = Path(file_path).stat().st_mtime

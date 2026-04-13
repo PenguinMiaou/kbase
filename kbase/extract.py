@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 
-MAX_FILE_SIZE_MB = 200  # Skip files larger than this to prevent OOM
+MAX_FILE_SIZE_MB = 500  # Skip files larger than this to prevent OOM
 
 def extract_file(file_path: str | Path) -> dict:
     """Extract text and tables from a file. Returns {text, tables, metadata}."""
@@ -214,6 +214,10 @@ def _extract_docx(p: Path) -> dict:
 
 
 def _extract_xlsx(p: Path) -> dict:
+    # Handle old .xls format with xlrd
+    if p.suffix.lower() == '.xls':
+        return _extract_xls_legacy(p)
+
     from openpyxl import load_workbook
 
     wb = load_workbook(str(p), read_only=True, data_only=True)
@@ -593,11 +597,16 @@ def _extract_archive(p: Path) -> dict:
             with tarfile.open(str(p), "r:*") as tf:
                 tf.extractall(temp_dir)
         else:
-            # .rar, .7z - need external tools
+            # .rar, .7z
             import subprocess
             if ext == ".rar":
-                result = subprocess.run(["unrar", "x", "-y", str(p), temp_dir],
-                                         capture_output=True, timeout=120)
+                try:
+                    import rarfile
+                    with rarfile.RarFile(str(p)) as rf:
+                        rf.extractall(temp_dir)
+                except ImportError:
+                    result = subprocess.run(["unrar", "x", "-y", str(p), temp_dir],
+                                             capture_output=True, timeout=120)
             elif ext == ".7z":
                 result = subprocess.run(["7z", "x", f"-o{temp_dir}", "-y", str(p)],
                                          capture_output=True, timeout=120)
@@ -638,6 +647,31 @@ def _extract_archive(p: Path) -> dict:
             "archive_files": file_count,
         },
     }
+
+
+def _extract_xls_legacy(p: Path) -> dict:
+    """Extract old .xls format using xlrd."""
+    try:
+        import xlrd
+        wb = xlrd.open_workbook(str(p))
+        all_text = []
+        tables = []
+        for sheet in wb.sheets():
+            rows_data = []
+            for row_idx in range(sheet.nrows):
+                row_vals = [str(sheet.cell_value(row_idx, col)).strip() for col in range(sheet.ncols)]
+                if any(row_vals):
+                    rows_data.append(row_vals)
+            if not rows_data:
+                continue
+            headers = rows_data[0]
+            data_rows = rows_data[1:]
+            tables.append({"source": sheet.name, "headers": headers, "rows": data_rows, "file_name": p.stem})
+            all_text.append(f"## Sheet: {sheet.name}")
+            all_text.append(_table_to_markdown(headers, data_rows[:50]))
+        return {"text": "\n\n".join(all_text), "tables": tables, "metadata": {"title": p.stem}}
+    except ImportError:
+        return {"text": f"[.xls file: {p.name} — install xlrd: pip install xlrd]", "metadata": {"title": p.stem, "error": "xlrd not installed"}}
 
 
 def _extract_ppt_legacy(p: Path) -> dict:
