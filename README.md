@@ -15,8 +15,7 @@ No cloud upload. No vendor lock-in. Your data stays on your machine.
 
 [Quick Start](#quick-start) | [Features](#features) | [Knowledge Graph](#knowledge-graph) | [Architecture](#architecture) | [CLI](#cli) | [中文](README_zh.md)
 
-<!-- Screenshots: replace placeholder paths after user provides images -->
-<img src="docs/screenshots/chat-demo.png" alt="KBase Chat" width="800">
+<img src="docs/screenshots/hero.png" alt="KBase" width="800">
 
 </div>
 
@@ -62,7 +61,7 @@ Query -> Synonym Expand -> [HyDE -> Multi-Query]* -> Semantic + Keyword + Filena
 
 ### Knowledge Graph
 
-<img src="docs/screenshots/graph-dark.png" alt="Knowledge Graph" width="700">
+<img src="docs/screenshots/graph-local.png" alt="Knowledge Graph" width="700">
 
 Obsidian-style graph visualization with **Graph + Canvas dual mode**:
 
@@ -139,11 +138,14 @@ Auto-routes by language: Chinese queries hit Bing CN + DuckDuckGo, English queri
 <details>
 <summary>More screenshots</summary>
 
-| Dark Mode | Light Mode |
-|-----------|------------|
-| <img src="docs/screenshots/chat-dark.png" width="400"> | <img src="docs/screenshots/chat-light.png" width="400"> |
-| <img src="docs/screenshots/search-dark.png" width="400"> | <img src="docs/screenshots/ingest-light.png" width="400"> |
-| <img src="docs/screenshots/graph-dark.png" width="400"> | <img src="docs/screenshots/graph-light.png" width="400"> |
+| Feature | Screenshot |
+|---------|-----------|
+| Search + PPTX Preview | <img src="docs/screenshots/search-preview.png" width="700"> |
+| Search File Type Filter | <img src="docs/screenshots/search-filter.png" width="700"> |
+| Graph Hover + Preview | <img src="docs/screenshots/graph-hover.png" width="700"> |
+| File List | <img src="docs/screenshots/file-list.png" width="700"> |
+| Ingest Progress | <img src="docs/screenshots/ingest.png" width="700"> |
+| Settings | <img src="docs/screenshots/settings1.png" width="700"> |
 
 </details>
 
