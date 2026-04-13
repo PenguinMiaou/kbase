@@ -106,6 +106,19 @@ def create_app(workspace: str = "default") -> FastAPI:
                 )
                 path = result.stdout.strip()
                 if path:
+                    # Test if we can actually read the directory
+                    try:
+                        os.listdir(path)
+                    except PermissionError:
+                        # Can't access — prompt user to grant permission
+                        subprocess.run(["osascript", "-e",
+                            'display dialog "KBase needs permission to access this folder.\\n\\n'
+                            'Click OK to open System Settings, then add KBase to Full Disk Access." '
+                            'buttons {"Cancel", "Open Settings"} default button "Open Settings"'],
+                            capture_output=True, text=True, timeout=30,
+                        )
+                        subprocess.run(["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"])
+                        return {"path": "", "error": "permission_needed"}
                     return {"path": path}
             except Exception:
                 pass

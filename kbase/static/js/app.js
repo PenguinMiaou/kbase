@@ -984,9 +984,14 @@ async function browseDir(){
       if(e.name==='AbortError')return; // User cancelled
     }
   }
-  // Method 2: Backend Tkinter dialog
+  // Method 2: Backend native dialog (osascript on macOS)
   try{
     const d=await api('/api/browse-dir');
+    if(d.error==='permission_needed'){
+      const el=document.getElementById('ingest-result');
+      if(el)el.innerHTML='<div style="padding:10px;border:1px solid var(--yellow);border-radius:8px;color:var(--yellow);font-size:12px;">System Settings opened. Add KBase to "Full Disk Access", then try again.</div>';
+      return;
+    }
     if(d.path){document.getElementById('ingest-path').value=d.path;return;}
   }catch(e){}
   // Method 3: Prompt fallback
