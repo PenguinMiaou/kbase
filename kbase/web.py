@@ -1122,8 +1122,19 @@ print(path)
 
     @app.post("/api/shutdown")
     def api_shutdown():
-        """Gracefully shutdown the server."""
-        os.kill(os.getpid(), signal.SIGTERM)
+        """Gracefully shutdown the entire app (server + launcher)."""
+        import threading
+        def _do_shutdown():
+            time.sleep(0.5)
+            # Kill parent process (launcher) which will also kill this server
+            ppid = os.getppid()
+            try:
+                os.kill(ppid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            # Kill self
+            os.kill(os.getpid(), signal.SIGKILL)
+        threading.Thread(target=_do_shutdown, daemon=True).start()
         return {"status": "shutting down"}
 
     # ---- Frontend ----
