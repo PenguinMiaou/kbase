@@ -162,11 +162,11 @@ Auto-routes by language: Chinese queries hit Bing CN + DuckDuckGo, English queri
 
 ### macOS (DMG)
 
-Download `KBase-0.5.0.dmg` from [Releases](https://github.com/PenguinMiaou/kbase/releases) -> Drag to Applications -> Open.
+Download `KBase-0.5.1.dmg` from [Releases](https://github.com/PenguinMiaou/kbase/releases) -> Drag to Applications -> Open.
 
 ### Windows (EXE)
 
-Download `KBase-0.5.0-Windows.zip` from [Releases](https://github.com/PenguinMiaou/kbase/releases) -> Extract -> Run `KBase.exe`.
+Download `KBase-0.5.1-Windows.zip` from [Releases](https://github.com/PenguinMiaou/kbase/releases) -> Extract -> Run `KBase.exe`.
 
 ### From Source
 

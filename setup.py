@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="kbase",
-    version="0.5.0",
+    version="0.5.1",
     author="PenguinMiaou",
     license="MIT",
     packages=find_packages(),

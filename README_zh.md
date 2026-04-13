@@ -130,11 +130,11 @@ DuckDuckGo / Brave / Google (Serper) / Bing 国际版 / 搜狗 / 微信文章，
 
 ### macOS (DMG)
 
-从 [Releases](https://github.com/PenguinMiaou/kbase/releases) 下载 `KBase-0.5.0.dmg` -> 拖到 Applications -> 打开。
+从 [Releases](https://github.com/PenguinMiaou/kbase/releases) 下载 `KBase-0.5.1.dmg` -> 拖到 Applications -> 打开。
 
 ### Windows (EXE)
 
-从 [Releases](https://github.com/PenguinMiaou/kbase/releases) 下载 `KBase-0.5.0-Windows.zip` -> 解压 -> 运行 `KBase.exe`。
+从 [Releases](https://github.com/PenguinMiaou/kbase/releases) 下载 `KBase-0.5.1-Windows.zip` -> 解压 -> 运行 `KBase.exe`。
 
 ### 从源码
 

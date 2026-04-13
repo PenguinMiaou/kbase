@@ -106,8 +106,8 @@ app = BUNDLE(
     info_plist={
         'CFBundleName': 'KBase',
         'CFBundleDisplayName': 'KBase',
-        'CFBundleVersion': '0.5.0',
-        'CFBundleShortVersionString': '0.5.0',
+        'CFBundleVersion': '0.5.1',
+        'CFBundleShortVersionString': '0.5.1',
         'NSHighResolutionCapable': True,
         'LSMinimumSystemVersion': '10.15',
         'NSHumanReadableCopyright': 'Copyright@PenguinMiaou',
