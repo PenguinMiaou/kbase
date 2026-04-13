@@ -121,7 +121,16 @@ def hybrid_search(store: KBaseStore, query: str, top_k: int = 10,
     fused = _apply_directory_priority(fused)
     methods.append("dir-priority")
 
-    # 9. Table hint detection
+    # 10. Graph coherence boost — confirmed relationships boost search ranking
+    try:
+        from kbase.graph import boost_search_with_graph
+        fused = boost_search_with_graph(store, fused)
+        if any(r.get("graph_boosted") for r in fused):
+            methods.append("graph-boost")
+    except Exception:
+        pass  # graph module not available or no edges
+
+    # 11. Table hint detection
     table_hint = _detect_table_query(query)
     table_results = None
     if table_hint:

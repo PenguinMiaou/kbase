@@ -946,6 +946,50 @@ body {
   letter-spacing: 0.3px;
 }
 
+/* === Knowledge Graph === */
+#graph-container { background: var(--bg); }
+#panel-graph { background: var(--bg); }
+
+.graph-mode-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border: none; background: transparent;
+  color: var(--text-dim); font-size: 12px; cursor: pointer;
+  transition: all 0.15s;
+}
+.graph-mode-btn:hover { color: var(--text); background: var(--accent-light); }
+.graph-mode-btn.active {
+  color: var(--accent); background: var(--accent-light); font-weight: 500;
+}
+
+/* Cytoscape tooltip */
+.graph-tooltip {
+  position: absolute; z-index: 30;
+  background: var(--card); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 12px; font-size: 12px;
+  box-shadow: var(--shadow-md); pointer-events: none;
+  max-width: 280px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.graph-tooltip .tt-name { font-weight: 600; margin-bottom: 2px; }
+.graph-tooltip .tt-type { color: var(--text-muted); font-size: 11px; }
+.graph-tooltip .tt-dir { color: var(--text-muted); font-size: 10px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; }
+
+/* Right-click context menu */
+.graph-ctx-menu {
+  position: absolute; z-index: 40;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 4px 0;
+  box-shadow: var(--shadow-lg); min-width: 160px;
+}
+.graph-ctx-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 14px; font-size: 12px; color: var(--text);
+  cursor: pointer; transition: background 0.1s;
+}
+.graph-ctx-item:hover { background: var(--accent-light); color: var(--accent); }
+.graph-ctx-item svg { width: 14px; height: 14px; flex-shrink: 0; }
+.graph-ctx-sep { height: 1px; background: var(--border); margin: 4px 0; }
+
 /* Responsive */
 @media (max-width: 768px) {
   .app-layout { grid-template-columns: 1fr; }

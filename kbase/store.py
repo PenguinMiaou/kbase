@@ -190,6 +190,40 @@ class KBaseStore:
         c.execute("CREATE INDEX IF NOT EXISTS idx_files_source_dir ON files(source_dir)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_files_type ON files(file_type)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_files_name ON files(file_name)")
+
+        # Knowledge graph: document relationships
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS document_edges (
+                edge_id TEXT PRIMARY KEY,
+                source_file_id TEXT NOT NULL,
+                target_file_id TEXT NOT NULL,
+                edge_type TEXT DEFAULT 'auto',
+                label TEXT DEFAULT '',
+                direction TEXT DEFAULT 'none',
+                score REAL DEFAULT 0.0,
+                method TEXT DEFAULT 'semantic',
+                created_at REAL,
+                updated_at REAL,
+                FOREIGN KEY (source_file_id) REFERENCES files(file_id),
+                FOREIGN KEY (target_file_id) REFERENCES files(file_id)
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_edges_source ON document_edges(source_file_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_edges_target ON document_edges(target_file_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_edges_type ON document_edges(edge_type)")
+
+        # Knowledge graph: node positions for canvas/whiteboard mode
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS graph_node_positions (
+                file_id TEXT PRIMARY KEY,
+                x REAL NOT NULL DEFAULT 0,
+                y REAL NOT NULL DEFAULT 0,
+                pinned INTEGER DEFAULT 0,
+                color_group TEXT DEFAULT '',
+                updated_at REAL,
+                FOREIGN KEY (file_id) REFERENCES files(file_id)
+            )
+        """)
         self.conn.commit()
 
     def file_id(self, file_path: str) -> str:

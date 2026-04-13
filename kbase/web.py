@@ -850,6 +850,82 @@ del "%~f0" >nul 2>&1
         threading.Thread(target=_do_shutdown, daemon=True).start()
         return {"success": True, "message": "Installing update... KBase will restart."}
 
+    # ---- Knowledge Graph API ----
+
+    @app.get("/api/graph")
+    def api_graph(
+        min_score: float = Query(0.0),
+        edge_type: str = Query(None),
+        file_type: str = Query(None),
+        source_dir: str = Query(None),
+    ):
+        """Get full graph data for visualization."""
+        from kbase.graph import get_graph_data
+        store = get_store()
+        edge_types = edge_type.split(",") if edge_type else None
+        return get_graph_data(store, edge_types=edge_types, min_score=min_score,
+                             file_type=file_type, source_dir=source_dir)
+
+    @app.get("/api/graph/local/{file_id}")
+    def api_graph_local(file_id: str, depth: int = Query(2), min_score: float = Query(0.0)):
+        """Get local subgraph centered on a file."""
+        from kbase.graph import get_local_graph
+        store = get_store()
+        return get_local_graph(store, file_id, depth=depth, min_score=min_score)
+
+    @app.post("/api/graph/compute")
+    def api_graph_compute():
+        """Trigger graph relationship computation."""
+        from kbase.graph import compute_graph
+        store = get_store()
+        result = compute_graph(store, threshold=0.65)
+        return result
+
+    @app.get("/api/graph/stats")
+    def api_graph_stats():
+        """Get graph statistics."""
+        from kbase.graph import get_graph_stats
+        store = get_store()
+        return get_graph_stats(store)
+
+    @app.post("/api/graph/edge")
+    async def api_graph_edge_create(request: Request):
+        """Create or confirm an edge."""
+        from kbase.graph import add_edge
+        store = get_store()
+        body = await request.json()
+        return add_edge(
+            store,
+            source_id=body["source"],
+            target_id=body["target"],
+            edge_type=body.get("edge_type", "confirmed"),
+            label=body.get("label", ""),
+            direction=body.get("direction", "forward"),
+        )
+
+    @app.put("/api/graph/edge/{edge_id}")
+    async def api_graph_edge_update(edge_id: str, request: Request):
+        """Update an edge."""
+        from kbase.graph import update_edge
+        store = get_store()
+        body = await request.json()
+        return update_edge(store, edge_id, **body)
+
+    @app.delete("/api/graph/edge/{edge_id}")
+    def api_graph_edge_delete(edge_id: str):
+        """Delete an edge."""
+        from kbase.graph import delete_edge
+        store = get_store()
+        return delete_edge(store, edge_id)
+
+    @app.put("/api/graph/positions")
+    async def api_graph_positions(request: Request):
+        """Save node positions for canvas mode."""
+        from kbase.graph import save_positions
+        store = get_store()
+        body = await request.json()
+        return save_positions(store, body.get("positions", []))
+
     # ---- Glossary API ----
 
     @app.get("/api/glossary")

@@ -6,6 +6,11 @@
 <link rel="icon" href="/static/logos/kbase-logo.svg">
 <title>KBase</title>
 <link rel="stylesheet" href="/static/css/app.css">
+<script src="https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"></script>
+<script src="https://unpkg.com/layout-base@2.0.1/layout-base.js"></script>
+<script src="https://unpkg.com/cose-base@2.2.0/cose-base.js"></script>
+<script src="https://unpkg.com/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
+<script src="https://unpkg.com/cytoscape-edgehandles@4.0.1/cytoscape-edgehandles.js"></script>
 </head>
 <body>
 <!-- Loading Screen -->
@@ -39,6 +44,10 @@
       <div class="nav-tab" data-tab="search" onclick="switchTab('search')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
         Search
+      </div>
+      <div class="nav-tab" data-tab="graph" onclick="switchTab('graph')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><circle cx="12" cy="12" r="2.5"/><path d="M7.5 7.5l3 3M13.5 13.5l3 3M16.5 7.5l-3 3M7.5 16.5l3-3"/></svg>
+        Graph
       </div>
       <div class="nav-tab" data-tab="sql" onclick="switchTab('sql')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
@@ -119,6 +128,97 @@
           <button class="btn-accent" style="border-radius:10px;white-space:nowrap;" onclick="doSearch()">Search</button>
         </div>
         <div id="search-results"></div>
+      </div>
+    </div>
+
+    <!-- Graph / Canvas Panel -->
+    <div class="tab-panel" id="panel-graph" style="display:none;flex:1;padding:0;overflow:hidden;position:relative;">
+      <!-- Toolbar -->
+      <div id="graph-toolbar" style="position:absolute;top:0;left:0;right:0;z-index:10;display:flex;align-items:center;gap:8px;padding:8px 16px;background:var(--bg);border-bottom:1px solid var(--border);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);">
+        <!-- Mode switch -->
+        <div style="display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
+          <button id="graph-mode-graph" class="graph-mode-btn active" onclick="setGraphMode('graph')" title="Graph View">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><circle cx="12" cy="12" r="2"/><path d="M7.5 7.5l3 3M13.5 13.5l3 3"/></svg>
+            <span data-i18n="graphMode">Graph</span>
+          </button>
+          <button id="graph-mode-canvas" class="graph-mode-btn" onclick="setGraphMode('canvas')" title="Canvas / Whiteboard">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
+            <span data-i18n="canvasMode">Canvas</span>
+          </button>
+        </div>
+        <!-- Search -->
+        <div style="flex:1;max-width:300px;">
+          <input id="graph-search" type="text" placeholder="Filter nodes..." style="width:100%;padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:12px;outline:none;">
+        </div>
+        <!-- Filters -->
+        <select id="graph-filter-type" onchange="applyGraphFilters()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:12px;">
+          <option value="">All Types</option>
+          <option value="pptx">PPTX</option>
+          <option value="docx">DOCX</option>
+          <option value="pdf">PDF</option>
+          <option value="xlsx">XLSX</option>
+          <option value="md">Markdown</option>
+          <option value="txt">Text</option>
+        </select>
+        <select id="graph-filter-edges" onchange="applyGraphFilters()" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:12px;">
+          <option value="">All Edges</option>
+          <option value="auto">Auto Only</option>
+          <option value="confirmed">Confirmed</option>
+          <option value="labeled">Labeled</option>
+        </select>
+        <!-- Score slider -->
+        <div style="display:flex;align-items:center;gap:4px;">
+          <span style="font-size:11px;color:var(--text-muted);white-space:nowrap;">Min:</span>
+          <input id="graph-min-score" type="range" min="0" max="100" value="0" step="5" onchange="applyGraphFilters()" style="width:80px;accent-color:var(--accent);">
+          <span id="graph-min-score-val" style="font-size:11px;color:var(--text-dim);min-width:28px;">0%</span>
+        </div>
+        <!-- Actions -->
+        <button onclick="computeGraph()" class="btn-outline" style="padding:4px 10px;font-size:12px;" title="Compute relationships">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+          <span data-i18n="computeGraph">Compute</span>
+        </button>
+        <button onclick="fitGraph()" class="btn-outline" style="padding:4px 10px;font-size:12px;" title="Fit to view">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+        </button>
+      </div>
+
+      <!-- Cytoscape container -->
+      <div id="graph-container" style="width:100%;height:100%;"></div>
+
+      <!-- Status bar -->
+      <div id="graph-statusbar" style="position:absolute;bottom:0;left:0;right:0;z-index:10;display:flex;align-items:center;gap:12px;padding:6px 16px;background:var(--bg);border-top:1px solid var(--border);font-size:11px;color:var(--text-muted);">
+        <span id="graph-stat-nodes">0 nodes</span>
+        <span id="graph-stat-edges">0 edges</span>
+        <span id="graph-stat-last"></span>
+      </div>
+
+      <!-- Edge edit modal (for label/direction) -->
+      <div id="graph-edge-modal" style="display:none;position:absolute;z-index:20;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;box-shadow:var(--shadow-lg);min-width:260px;">
+        <h4 style="margin:0 0 12px;font-size:14px;color:var(--text);" data-i18n="editEdge">Edit Relationship</h4>
+        <input id="edge-modal-id" type="hidden">
+        <div style="margin-bottom:8px;">
+          <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:3px;" data-i18n="edgeLabel">Label</label>
+          <input id="edge-modal-label" type="text" placeholder="e.g. reference, prerequisite..." style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;outline:none;">
+        </div>
+        <div style="margin-bottom:8px;">
+          <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:3px;" data-i18n="edgeDirection">Direction</label>
+          <select id="edge-modal-direction" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;">
+            <option value="none">None (bidirectional)</option>
+            <option value="forward">Forward (A -> B)</option>
+            <option value="backward">Backward (B -> A)</option>
+          </select>
+        </div>
+        <div style="margin-bottom:8px;">
+          <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:3px;" data-i18n="edgeType">Type</label>
+          <select id="edge-modal-type" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:12px;">
+            <option value="confirmed">Confirmed</option>
+            <option value="labeled">Labeled</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+          <button onclick="closeEdgeModal()" class="btn-outline" style="padding:5px 12px;font-size:12px;">Cancel</button>
+          <button onclick="saveEdgeModal()" class="btn-accent" style="padding:5px 12px;font-size:12px;">Save</button>
+        </div>
       </div>
     </div>
 

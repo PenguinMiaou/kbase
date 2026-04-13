@@ -141,7 +141,7 @@ if(localStorage.getItem('kbase-ui-lang'))document.getElementById('ui-lang').valu
 
 // === Tabs ===
 const chatPanels=['chat-area','input-area'];
-const tabPanels=['search','sql','files','ingest','connectors','settings'];
+const tabPanels=['search','graph','sql','files','ingest','connectors','settings'];
 
 function switchTab(name){
   document.querySelectorAll('.nav-tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
@@ -163,6 +163,7 @@ function switchTab(name){
   if(name==='ingest')loadIngestDirs();
   if(name==='connectors')loadConnectorList();
   if(name==='settings')loadSettingsPanel();
+  if(name==='graph'){/* handled by patch below */}
   // Auto-focus chat input when switching to chat
   if(name==='chat'){const ci=document.getElementById('chat-input');if(ci)ci.focus();}
 }
@@ -1864,6 +1865,11 @@ const I18N={
     set_lang:'语言配置',set_lang_desc:'优化分词和同义词扩展',
     set_chunk:'分块、搜索与记忆',
     set_buddy:'助手预设',
+    graphMode:'图谱',canvasMode:'白板',computeGraph:'计算关系',
+    editEdge:'编辑关系',edgeLabel:'标签',edgeDirection:'方向',edgeType:'类型',
+    openFile:'打开文件',viewLocal:'查看局部图',pinNode:'固定位置',unpinNode:'取消固定',
+    confirmEdge:'确认关系',deleteEdge:'删除关系',addLabel:'添加标签',
+    computing:'正在计算...',computed:'计算完成',graphEmpty:'暂无图谱数据，请先导入文件并点击 Compute',
     set_memory:'全局记忆',set_memory_desc:'KBase 会记住关键事实，持续优化回答',
     chunkMax:'分块大小',chunkOverlap:'重叠长度',memoryTurns:'记忆轮数',
     topK:'搜索结果数',reranking:'重排序',timeDecay:'时间衰减',
@@ -1896,6 +1902,11 @@ const I18N={
     set_lang:'Language Profile',set_lang_desc:'Optimizes segmentation and synonym expansion',
     set_chunk:'Chunk, Search & Memory',
     set_buddy:'Buddy Preset',
+    graphMode:'Graph',canvasMode:'Canvas',computeGraph:'Compute',
+    editEdge:'Edit Relationship',edgeLabel:'Label',edgeDirection:'Direction',edgeType:'Type',
+    openFile:'Open File',viewLocal:'Local Graph',pinNode:'Pin Position',unpinNode:'Unpin',
+    confirmEdge:'Confirm',deleteEdge:'Delete',addLabel:'Add Label',
+    computing:'Computing...',computed:'Done',graphEmpty:'No graph data yet. Ingest files and click Compute.',
     set_memory:'Global Memory',set_memory_desc:'KBase remembers key facts across conversations.',
     chunkMax:'Chunk Max Size',chunkOverlap:'Chunk Overlap',memoryTurns:'Memory Turns',
     topK:'Search Top-K',reranking:'Re-ranking',timeDecay:'Time Decay',
@@ -1961,3 +1972,584 @@ async function shutdown(){
   try{await fetch('/api/shutdown',{method:'POST'});}catch(e){}
   document.body.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:var(--text-muted);">KBase stopped. Close this tab.</div>';
 }
+
+// ======================================================================
+// === Knowledge Graph (Phase 1-3) =====================================
+// ======================================================================
+let _cy=null; // Cytoscape instance
+let _graphMode='graph'; // 'graph' | 'canvas'
+let _edgehandles=null;
+let _graphTooltip=null;
+let _graphCtxMenu=null;
+let _graphLocalCenter=null; // file_id for local graph view
+
+// --- File type to color mapping ---
+const FILE_TYPE_COLORS={
+  pptx:'#ef4444',pdf:'#f97316',docx:'#3b82f6',xlsx:'#22c55e',
+  md:'#a855f7',txt:'#6b7280',html:'#06b6d4',eml:'#ec4899',
+  mp3:'#f59e0b',m4a:'#f59e0b',zip:'#78716c',rar:'#78716c',
+};
+
+function getNodeColor(fileType){
+  return FILE_TYPE_COLORS[fileType]||'var(--accent)';
+}
+
+// --- Get CSS variable value ---
+function getCSSVar(name){
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+// --- Build Cytoscape stylesheet ---
+function buildGraphStyle(){
+  const isDark=document.documentElement.getAttribute('data-theme')==='dark';
+  const accent=getCSSVar('--accent');
+  const textDim=getCSSVar('--text-dim');
+  const textMuted=getCSSVar('--text-muted');
+  const border=getCSSVar('--border');
+  const bg=getCSSVar('--bg');
+  const edgeAutoColor=isDark?'rgba(148,163,184,0.18)':'rgba(0,0,0,0.1)';
+  const edgeConfirmedColor=isDark?'rgba(129,140,248,0.6)':'rgba(99,102,241,0.5)';
+  const edgeLabeledColor=isDark?'rgba(129,140,248,0.85)':'rgba(99,102,241,0.7)';
+
+  return [
+    // Nodes
+    {selector:'node',style:{
+      'background-color':accent,
+      'label':'data(label)',
+      'font-size':function(ele){return Math.max(8,Math.min(13,8+ele.data('degree')*0.4));},
+      'width':function(ele){return Math.max(12,Math.min(50,12+ele.data('degree')*3));},
+      'height':function(ele){return Math.max(12,Math.min(50,12+ele.data('degree')*3));},
+      'color':textDim,
+      'text-valign':'bottom',
+      'text-margin-y':4,
+      'text-outline-width':2,
+      'text-outline-color':bg,
+      'text-max-width':120,
+      'text-wrap':'ellipsis',
+      'border-width':0,
+      'overlay-opacity':0,
+      'transition-property':'width, height, background-color, opacity, border-width',
+      'transition-duration':'0.15s',
+      'text-opacity':function(ele){return ele.data('degree')>2?1:0.7;},
+    }},
+    // Node colors by file type
+    {selector:'node[file_type="pptx"]',style:{'background-color':'#ef4444'}},
+    {selector:'node[file_type="pdf"]',style:{'background-color':'#f97316'}},
+    {selector:'node[file_type="docx"]',style:{'background-color':'#3b82f6'}},
+    {selector:'node[file_type="xlsx"]',style:{'background-color':'#22c55e'}},
+    {selector:'node[file_type="md"]',style:{'background-color':'#a855f7'}},
+    {selector:'node[file_type="txt"]',style:{'background-color':'#6b7280'}},
+    {selector:'node[file_type="html"]',style:{'background-color':'#06b6d4'}},
+    // Center node (local graph)
+    {selector:'node[?is_center]',style:{
+      'border-width':3,'border-color':accent,
+      'background-color':accent,'z-index':10,
+    }},
+    // Pinned nodes
+    {selector:'node.pinned',style:{'border-width':2,'border-color':textMuted,'border-style':'dashed'}},
+    // Hover states (Juggl pattern: class-based)
+    {selector:'node.hover',style:{
+      'background-color':accent,'border-width':2,'border-color':accent,
+      'font-weight':'bold','z-index':20,'text-opacity':1,
+    }},
+    {selector:'.unhover',style:{'opacity':0.15}},
+    {selector:'node.connected-hover',style:{'opacity':1,'text-opacity':1,'border-width':1,'border-color':accent}},
+    // Selected
+    {selector:'node:selected',style:{'border-width':3,'border-color':accent,'overlay-opacity':0.08,'overlay-color':accent}},
+    // Search highlight
+    {selector:'node.search-match',style:{'border-width':2,'border-color':'#f59e0b','overlay-opacity':0.1,'overlay-color':'#f59e0b'}},
+    {selector:'node.search-dim',style:{'opacity':0.12}},
+
+    // Edges — auto (dashed, faint)
+    {selector:'edge[edge_type="auto"]',style:{
+      'line-color':edgeAutoColor,'width':1,
+      'line-style':'dashed','line-dash-pattern':[6,4],
+      'curve-style':'bezier','opacity':0.7,
+      'target-arrow-shape':'none',
+      'transition-property':'opacity, line-color, width',
+      'transition-duration':'0.15s',
+    }},
+    // Edges — confirmed (solid)
+    {selector:'edge[edge_type="confirmed"]',style:{
+      'line-color':edgeConfirmedColor,'width':1.5,
+      'line-style':'solid','curve-style':'bezier','opacity':0.9,
+      'target-arrow-shape':'none',
+    }},
+    // Edges — labeled (solid + label)
+    {selector:'edge[edge_type="labeled"]',style:{
+      'line-color':edgeLabeledColor,'width':2,
+      'line-style':'solid','curve-style':'bezier','opacity':1,
+      'label':'data(label)','font-size':9,'color':textMuted,
+      'text-rotation':'autorotate','text-margin-y':-8,
+      'text-outline-width':2,'text-outline-color':bg,
+      'target-arrow-shape':'none',
+    }},
+    // Directional edges (forward)
+    {selector:'edge[direction="forward"]',style:{
+      'target-arrow-shape':'triangle','target-arrow-color':'inherit',
+      'arrow-scale':0.8,
+    }},
+    {selector:'edge[direction="backward"]',style:{
+      'source-arrow-shape':'triangle','source-arrow-color':'inherit',
+      'arrow-scale':0.8,
+    }},
+    // Edge hover
+    {selector:'edge.hover',style:{'width':3,'opacity':1,'z-index':10}},
+    {selector:'edge.connected-hover',style:{'opacity':1,'width':2}},
+
+    // Edgehandles styling
+    {selector:'.eh-handle',style:{
+      'background-color':'#ef4444','width':10,'height':10,
+      'shape':'ellipse','overlay-opacity':0,'border-width':8,'border-opacity':0,
+    }},
+    {selector:'.eh-hover',style:{'background-color':'#ef4444'}},
+    {selector:'.eh-source',style:{'border-width':2,'border-color':'#ef4444'}},
+    {selector:'.eh-target',style:{'border-width':2,'border-color':'#ef4444'}},
+    {selector:'.eh-preview, .eh-ghost-edge',style:{
+      'line-color':'#ef4444','target-arrow-color':'#ef4444',
+      'target-arrow-shape':'triangle',
+    }},
+  ];
+}
+
+// --- Initialize Cytoscape ---
+async function initGraph(){
+  const container=document.getElementById('graph-container');
+  if(!container)return;
+  if(_cy){_cy.destroy();_cy=null;}
+
+  _cy=cytoscape({
+    container:container,
+    style:buildGraphStyle(),
+    layout:{name:'preset'},
+    minZoom:0.1,maxZoom:5,
+    wheelSensitivity:0.3,
+    boxSelectionEnabled:true,
+  });
+
+  // Register fcose if available
+  if(typeof cytoscapeFcose!=='undefined')cytoscape.use(cytoscapeFcose);
+
+  // Edgehandles
+  if(typeof cytoscapeEdgehandles!=='undefined'){
+    cytoscape.use(cytoscapeEdgehandles);
+  }
+  _edgehandles=_cy.edgehandles({
+    snap:true,
+    noEdgeEventsInDraw:true,
+    complete:function(src,tgt,addedEdge){
+      // When user draws a new edge
+      addedEdge.remove(); // remove the temporary edge
+      createEdgeFromDraw(src.id(),tgt.id());
+    }
+  });
+  if(_graphMode!=='canvas')_edgehandles.disableDrawMode();
+
+  // --- Event handlers ---
+  // Hover: neighborhood highlighting (Juggl pattern)
+  _cy.on('mouseover','node',function(e){
+    const node=e.target;
+    _cy.elements().difference(node.closedNeighborhood()).addClass('unhover');
+    node.addClass('hover');
+    node.connectedEdges().addClass('connected-hover');
+    node.neighborhood('node').addClass('connected-hover');
+    showGraphTooltip(e,node);
+  });
+  _cy.on('mouseout','node',function(){
+    _cy.elements().removeClass('hover unhover connected-hover');
+    hideGraphTooltip();
+  });
+  // Edge hover
+  _cy.on('mouseover','edge',function(e){e.target.addClass('hover');});
+  _cy.on('mouseout','edge',function(e){e.target.removeClass('hover');});
+
+  // Click: show file in artifact panel
+  _cy.on('tap','node',function(e){
+    const d=e.target.data();
+    if(d.file_path)openFile(d.file_path);
+  });
+  // Double-click: local graph
+  _cy.on('dbltap','node',function(e){
+    loadLocalGraph(e.target.id());
+  });
+
+  // Right-click: context menu
+  _cy.on('cxttap','node',function(e){
+    e.originalEvent.preventDefault();
+    showNodeContextMenu(e);
+  });
+  _cy.on('cxttap','edge',function(e){
+    e.originalEvent.preventDefault();
+    showEdgeContextMenu(e);
+  });
+  // Click canvas to dismiss context menu
+  _cy.on('tap',function(e){if(e.target===_cy)hideContextMenu();});
+
+  // Drag end: save position in canvas mode
+  _cy.on('dragfree','node',function(e){
+    if(_graphMode==='canvas'){
+      e.target.lock();
+      e.target.addClass('pinned');
+      saveNodePosition(e.target);
+    }
+  });
+
+  // Search input
+  const searchInput=document.getElementById('graph-search');
+  if(searchInput){
+    searchInput.addEventListener('input',function(){
+      const q=this.value.trim().toLowerCase();
+      if(!q){_cy.elements().removeClass('search-match search-dim');return;}
+      _cy.nodes().forEach(n=>{
+        const label=(n.data('label')||'').toLowerCase();
+        const path=(n.data('file_path')||'').toLowerCase();
+        if(label.includes(q)||path.includes(q)){
+          n.removeClass('search-dim').addClass('search-match');
+        }else{
+          n.removeClass('search-match').addClass('search-dim');
+        }
+      });
+    });
+  }
+  // Min score slider label
+  const slider=document.getElementById('graph-min-score');
+  if(slider)slider.addEventListener('input',function(){
+    document.getElementById('graph-min-score-val').textContent=this.value+'%';
+  });
+
+  // Load data
+  await loadGraphData();
+}
+
+// --- Load graph data ---
+async function loadGraphData(){
+  if(!_cy)return;
+  const params=new URLSearchParams();
+  const minScore=parseFloat(document.getElementById('graph-min-score')?.value||0)/100;
+  if(minScore>0)params.set('min_score',minScore);
+  const edgeFilter=document.getElementById('graph-filter-edges')?.value;
+  if(edgeFilter)params.set('edge_type',edgeFilter);
+  const typeFilter=document.getElementById('graph-filter-type')?.value;
+  if(typeFilter)params.set('file_type',typeFilter);
+
+  try{
+    const url=_graphLocalCenter
+      ?`/api/graph/local/${_graphLocalCenter}?depth=2&min_score=${minScore}`
+      :`/api/graph?${params}`;
+    const d=await api(url);
+    renderGraph(d);
+  }catch(e){
+    console.error('Graph load error:',e);
+  }
+  // Update stats
+  try{
+    const stats=await api('/api/graph/stats');
+    const sn=document.getElementById('graph-stat-nodes');
+    const se=document.getElementById('graph-stat-edges');
+    const sl=document.getElementById('graph-stat-last');
+    if(sn)sn.textContent=stats.nodes+' nodes';
+    if(se)se.textContent=stats.edges_total+' edges ('+stats.edges_auto+' auto, '+stats.edges_confirmed+' confirmed, '+stats.edges_labeled+' labeled)';
+    if(sl&&stats.last_compute){
+      const ago=Math.round((Date.now()/1000-stats.last_compute)/60);
+      sl.textContent=ago<60?(ago+'m ago'):(Math.round(ago/60)+'h ago');
+    }
+  }catch(e){}
+}
+
+function renderGraph(data){
+  if(!_cy)return;
+  _cy.elements().remove();
+  if(!data.nodes||data.nodes.length===0){
+    // Show empty state
+    return;
+  }
+
+  // Add elements
+  const elements=[];
+  data.nodes.forEach(n=>{
+    const el={group:'nodes',data:n.data};
+    if(n.position&&n.position.x!==0&&n.position.y!==0)el.position=n.position;
+    if(n.locked)el.locked=true;
+    elements.push(el);
+  });
+  data.edges.forEach(e=>{elements.push({group:'edges',data:e.data});});
+  _cy.add(elements);
+
+  // Apply pinned class
+  _cy.nodes().forEach(n=>{if(n.locked())n.addClass('pinned');});
+
+  // Run layout
+  if(_graphMode==='graph'){
+    runForceLayout();
+  }else{
+    // Canvas mode: use saved positions, or fcose for unpositioned
+    const unpositioned=_cy.nodes().filter(n=>!n.position()||(!n.position().x&&!n.position().y));
+    if(unpositioned.length>0&&unpositioned.length<_cy.nodes().length){
+      // Some nodes have positions, layout only unpositioned
+      unpositioned.layout({name:'fcose',animate:true,animationDuration:600,
+        randomize:true,nodeRepulsion:4500,idealEdgeLength:80,gravity:0.25}).run();
+    }else if(unpositioned.length===_cy.nodes().length){
+      runForceLayout();
+    }
+    // Lock all nodes in canvas mode
+    _cy.nodes().forEach(n=>{n.lock();n.addClass('pinned');});
+  }
+}
+
+function runForceLayout(){
+  if(!_cy||_cy.nodes().length===0)return;
+  _cy.nodes().forEach(n=>{if(!n.hasClass('pinned'))n.unlock();});
+  _cy.layout({
+    name:'fcose',
+    quality:'default',
+    randomize:true,
+    animate:true,
+    animationDuration:800,
+    animationEasing:'ease-out-cubic',
+    nodeSeparation:75,
+    idealEdgeLength:function(edge){
+      const t=edge.data('edge_type');
+      if(t==='labeled')return 60;
+      if(t==='confirmed')return 80;
+      return 120; // auto edges: longer distance
+    },
+    edgeElasticity:function(edge){
+      const t=edge.data('edge_type');
+      return t==='auto'?0.2:0.45;
+    },
+    nodeRepulsion:function(node){return 4500+node.data('degree')*500;},
+    gravity:0.25,
+    gravityRange:3.8,
+    fit:true,
+    padding:50,
+  }).run();
+}
+
+function fitGraph(){if(_cy)_cy.fit(undefined,50);}
+
+// --- Mode switching ---
+function setGraphMode(mode){
+  _graphMode=mode;
+  document.getElementById('graph-mode-graph')?.classList.toggle('active',mode==='graph');
+  document.getElementById('graph-mode-canvas')?.classList.toggle('active',mode==='canvas');
+  if(mode==='canvas'){
+    // Enable edgehandles draw mode
+    if(_edgehandles)_edgehandles.enableDrawMode();
+    // Lock all nodes
+    if(_cy)_cy.nodes().forEach(n=>{n.lock();n.addClass('pinned');});
+  }else{
+    if(_edgehandles)_edgehandles.disableDrawMode();
+    _graphLocalCenter=null;
+    if(_cy){
+      _cy.nodes().forEach(n=>{n.unlock();n.removeClass('pinned');});
+      runForceLayout();
+    }
+  }
+}
+
+// --- Compute graph ---
+async function computeGraph(){
+  const st=document.getElementById('graph-statusbar');
+  const origText=st?.innerHTML;
+  if(st)st.innerHTML=`<span style="color:var(--accent);">${t('computing')}</span>`;
+  try{
+    const d=await api('/api/graph/compute',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    if(st)st.innerHTML=`<span style="color:var(--green);">${t('computed')}: ${d.edges_computed||0} edges (${d.edges_semantic||0} semantic, ${d.edges_path||0} path)</span>`;
+    await loadGraphData();
+  }catch(e){
+    if(st)st.innerHTML=`<span style="color:var(--red);">Error: ${esc(e.message)}</span>`;
+  }
+}
+
+// --- Filter ---
+function applyGraphFilters(){loadGraphData();}
+
+// --- Local graph ---
+async function loadLocalGraph(fileId){
+  _graphLocalCenter=fileId;
+  await loadGraphData();
+}
+
+// --- Tooltip ---
+function showGraphTooltip(evt,node){
+  hideGraphTooltip();
+  const d=node.data();
+  const tip=document.createElement('div');
+  tip.className='graph-tooltip';
+  tip.innerHTML=`<div class="tt-name">${esc(d.label)}</div>`
+    +`<div class="tt-type">${(d.file_type||'').toUpperCase()} &middot; ${d.degree} connections</div>`
+    +`<div class="tt-dir">${esc(d.file_path||'')}</div>`;
+  const pos=node.renderedPosition();
+  const container=document.getElementById('graph-container');
+  const rect=container.getBoundingClientRect();
+  tip.style.left=(rect.left+pos.x+15)+'px';
+  tip.style.top=(rect.top+pos.y-10)+'px';
+  document.body.appendChild(tip);
+  _graphTooltip=tip;
+}
+function hideGraphTooltip(){
+  if(_graphTooltip){_graphTooltip.remove();_graphTooltip=null;}
+}
+
+// --- Context menus ---
+function showNodeContextMenu(evt){
+  hideContextMenu();
+  const node=evt.target;
+  const d=node.data();
+  const menu=document.createElement('div');
+  menu.className='graph-ctx-menu';
+  menu.id='graph-ctx-active';
+  const items=[
+    {icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
+      label:t('openFile'),action:()=>{if(d.file_path)openFile(d.file_path);}},
+    {icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2.5"/><path d="M7.5 7.5l3 3M13.5 13.5l3 3M16.5 7.5l-3 3M7.5 16.5l3-3"/><circle cx="6" cy="6" r="1.5"/><circle cx="18" cy="6" r="1.5"/><circle cx="6" cy="18" r="1.5"/><circle cx="18" cy="18" r="1.5"/></svg>',
+      label:t('viewLocal'),action:()=>loadLocalGraph(d.id)},
+    {sep:true},
+    {icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>',
+      label:node.locked()?t('unpinNode'):t('pinNode'),
+      action:()=>{
+        if(node.locked()){node.unlock();node.removeClass('pinned');}
+        else{node.lock();node.addClass('pinned');saveNodePosition(node);}
+      }},
+  ];
+  items.forEach(it=>{
+    if(it.sep){const s=document.createElement('div');s.className='graph-ctx-sep';menu.appendChild(s);return;}
+    const item=document.createElement('div');
+    item.className='graph-ctx-item';
+    item.innerHTML=it.icon+'<span>'+it.label+'</span>';
+    item.addEventListener('click',()=>{hideContextMenu();it.action();});
+    menu.appendChild(item);
+  });
+  const pos=evt.originalEvent;
+  menu.style.left=pos.clientX+'px';
+  menu.style.top=pos.clientY+'px';
+  document.body.appendChild(menu);
+  _graphCtxMenu=menu;
+  // Auto-dismiss
+  setTimeout(()=>document.addEventListener('click',hideContextMenu,{once:true}),50);
+}
+
+function showEdgeContextMenu(evt){
+  hideContextMenu();
+  const edge=evt.target;
+  const d=edge.data();
+  const menu=document.createElement('div');
+  menu.className='graph-ctx-menu';
+  menu.id='graph-ctx-active';
+  const items=[
+    {icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>',
+      label:t('confirmEdge'),action:()=>confirmEdgeFromMenu(d.id,d.source,d.target)},
+    {icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+      label:t('addLabel'),action:()=>openEdgeModal(d)},
+    {sep:true},
+    {icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>',
+      label:t('deleteEdge'),action:()=>deleteEdgeFromMenu(d.id,edge)},
+  ];
+  items.forEach(it=>{
+    if(it.sep){const s=document.createElement('div');s.className='graph-ctx-sep';menu.appendChild(s);return;}
+    const item=document.createElement('div');
+    item.className='graph-ctx-item';
+    item.innerHTML=it.icon+'<span>'+it.label+'</span>';
+    item.addEventListener('click',()=>{hideContextMenu();it.action();});
+    menu.appendChild(item);
+  });
+  const pos=evt.originalEvent;
+  menu.style.left=pos.clientX+'px';
+  menu.style.top=pos.clientY+'px';
+  document.body.appendChild(menu);
+  _graphCtxMenu=menu;
+  setTimeout(()=>document.addEventListener('click',hideContextMenu,{once:true}),50);
+}
+
+function hideContextMenu(){
+  if(_graphCtxMenu){_graphCtxMenu.remove();_graphCtxMenu=null;}
+}
+
+// --- Edge operations ---
+async function createEdgeFromDraw(sourceId,targetId){
+  try{
+    await api('/api/graph/edge',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({source:sourceId,target:targetId,edge_type:'confirmed',direction:'forward'})});
+    await loadGraphData();
+  }catch(e){console.error('Create edge error:',e);}
+}
+
+async function confirmEdgeFromMenu(edgeId,src,tgt){
+  try{
+    await api('/api/graph/edge',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({source:src,target:tgt,edge_type:'confirmed',direction:'forward'})});
+    await loadGraphData();
+  }catch(e){}
+}
+
+async function deleteEdgeFromMenu(edgeId,cyEdge){
+  try{
+    await api(`/api/graph/edge/${edgeId}`,{method:'DELETE'});
+    if(cyEdge)cyEdge.remove();
+  }catch(e){}
+}
+
+// --- Edge edit modal ---
+function openEdgeModal(edgeData){
+  const modal=document.getElementById('graph-edge-modal');
+  if(!modal)return;
+  document.getElementById('edge-modal-id').value=edgeData.id;
+  document.getElementById('edge-modal-label').value=edgeData.label||'';
+  document.getElementById('edge-modal-direction').value=edgeData.direction||'none';
+  document.getElementById('edge-modal-type').value=edgeData.edge_type==='auto'?'confirmed':edgeData.edge_type;
+  // Position near center
+  modal.style.left='50%';modal.style.top='50%';
+  modal.style.transform='translate(-50%,-50%)';
+  modal.style.display='block';
+}
+function closeEdgeModal(){
+  document.getElementById('graph-edge-modal').style.display='none';
+}
+async function saveEdgeModal(){
+  const id=document.getElementById('edge-modal-id').value;
+  const label=document.getElementById('edge-modal-label').value;
+  const direction=document.getElementById('edge-modal-direction').value;
+  const edgeType=document.getElementById('edge-modal-type').value;
+  const finalType=label?'labeled':edgeType;
+  try{
+    await api(`/api/graph/edge/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({edge_type:finalType,label:label,direction:direction})});
+    closeEdgeModal();
+    await loadGraphData();
+  }catch(e){console.error(e);}
+}
+
+// --- Save node position ---
+async function saveNodePosition(node){
+  const pos=node.position();
+  try{
+    await api('/api/graph/positions',{method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({positions:[{file_id:node.id(),x:pos.x,y:pos.y,pinned:true}]})});
+  }catch(e){}
+}
+
+// --- Theme change handler ---
+function updateGraphTheme(){
+  if(_cy)_cy.style(buildGraphStyle());
+}
+
+// Hook into theme toggle to update graph colors
+(function(){
+  const _origTT=typeof toggleTheme==='function'?toggleTheme:null;
+  if(_origTT){
+    toggleTheme=function(){
+      _origTT();
+      setTimeout(updateGraphTheme,50);
+    };
+  }
+})();
+
+// --- Patch switchTab to init graph when tab becomes visible ---
+(function(){
+  const _origST=switchTab;
+  switchTab=function(tab){
+    _origST(tab);
+    if(tab==='graph'&&!_cy)initGraph();
+    else if(tab==='graph'&&_cy)updateGraphTheme();
+  };
+})();
