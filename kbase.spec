@@ -110,5 +110,10 @@ app = BUNDLE(
         'NSHighResolutionCapable': True,
         'LSMinimumSystemVersion': '10.15',
         'NSHumanReadableCopyright': 'Copyright@PenguinMiaou',
+        # File access permissions (triggers macOS permission dialog)
+        'NSDocumentsFolderUsageDescription': 'KBase needs access to index your documents.',
+        'NSDownloadsFolderUsageDescription': 'KBase needs access to index files in Downloads.',
+        'NSDesktopFolderUsageDescription': 'KBase needs access to index files on Desktop.',
+        'NSAppleEventsUsageDescription': 'KBase uses this to open the folder picker dialog.',
     },
 )
