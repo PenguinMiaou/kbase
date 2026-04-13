@@ -25,25 +25,30 @@ def hybrid_search(store: KBaseStore, query: str, top_k: int = 10,
     Level 4: + recursive broadening (last resort)
     """
     methods = ["semantic", "keyword"]
-    GOOD_SCORE = 0.3   # L1 result good enough, skip escalation
-    OK_SCORE = 0.1     # L2 acceptable, skip L3
 
     # ── Level 1: Basic retrieval ──
     fetch_k = max(top_k * 5, 50)
     semantic_results = store.semantic_search(query, top_k=fetch_k, file_type=file_type)
 
-    # Quick check: if L1 already has great results, skip heavy processing
-    l1_top = max((r.get("score", 0) for r in semantic_results[:3]), default=0)
+    # Adaptive threshold: use score distribution, not fixed number
+    # If top-3 scores are tightly clustered AND high → confident match, skip escalation
+    # If scores are low or spread → uncertain, escalate
+    l1_scores = sorted([r.get("score", 0) for r in semantic_results[:5]], reverse=True)
+    l1_top = l1_scores[0] if l1_scores else 0
+    l1_spread = (l1_scores[0] - l1_scores[-1]) if len(l1_scores) >= 2 else 0
+    l1_confident = l1_top > 0.5 and l1_spread < 0.15  # High + clustered = good
+    search_level = 1
 
-    # ── Level 2: Query expansion + synonym (always cheap, always helpful) ──
+    # ── Level 2: Query expansion + synonym (always, nearly free) ──
     expanded = expand_query(query) if use_expand else query
     if expanded != query:
         semantic_expanded = store.semantic_search(expanded, top_k=fetch_k, file_type=file_type)
         semantic_results = _dedupe_merge(semantic_results, semantic_expanded)
         methods.append("expanded")
+    search_level = 2
 
-    # ── Level 3: HyDE + Multi-Query (only if L1/L2 scores are weak AND llm_func available) ──
-    if llm_func and l1_top < GOOD_SCORE:
+    # ── Level 3: HyDE + Multi-Query (LLM-powered, only if L1 not confident) ──
+    if llm_func and not l1_confident:
         hyde_query = generate_hyde(query, llm_func=llm_func)
         if hyde_query != query:
             hyde_results = store.semantic_search(hyde_query, top_k=fetch_k, file_type=file_type)
@@ -134,6 +139,8 @@ def hybrid_search(store: KBaseStore, query: str, top_k: int = 10,
         "result_count": len(fused[:top_k]),
         "table_hint": table_results,
         "methods_used": methods + (["table_hint"] if table_results else []),
+        "search_level": search_level,
+        "l1_confidence": {"top_score": round(l1_top, 3), "spread": round(l1_spread, 3), "confident": l1_confident},
     }
 
 
