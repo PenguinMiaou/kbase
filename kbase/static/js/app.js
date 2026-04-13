@@ -235,6 +235,10 @@ async function doChat(){
   if(isDeep){
     const url=`/api/research-stream?question=${encodeURIComponent(q)}&conv_id=${convId}`;
     const evtSrc=new EventSource(url);
+    // Show stop button for research mode
+    const sendBtn=document.getElementById('send-btn');
+    sendBtn.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+    sendBtn.onclick=()=>{evtSrc.close();clearInterval(timer);sendBtn.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>';sendBtn.onclick=sendChat;document.getElementById(loadId).innerHTML+='<div style="color:var(--text-muted);font-size:12px;margin-top:4px;">[Stopped by user]</div>';};
     const prog=document.getElementById('dp-'+loadId);
 
     evtSrc.onmessage=function(e){
@@ -963,6 +967,13 @@ async function resyncDir(path){
   loadStats();loadIngestDirs();
 }
 
+async function browseDir(){
+  try{
+    const d=await api('/api/browse-dir');
+    if(d.path){document.getElementById('ingest-path').value=d.path;}
+  }catch(e){}
+}
+
 async function doIngestNew(){
   const path=document.getElementById('ingest-path').value.trim();
   if(!path)return;
@@ -1542,23 +1553,41 @@ async function showErrors(){
 const I18N={
   zh:{
     newChat:'新对话',chat:'对话',search:'搜索',sql:'数据查询',files:'文件',ingest:'导入',
-    connectors:'连接器',settings:'设置',exit:'退出',
+    connectors:'连接器',settings:'设置',exit:'退出',update:'检查更新',
     today:'今天',yesterday:'昨天',week:'近7天',older:'更早',
     searchPlaceholder:'搜索知识库...',askPlaceholder:'向知识库提问...',
     searching:'搜索中...',noResults:'无结果',
     memory:'记忆',history:'历史',clear:'清除',
     save:'保存设置',saved:'已保存！',
     knowledge:'知识库',web:'网络',hybrid:'混合',research:'研究',deepThinking:'深度思考',
+    addDir:'添加目录',browse:'浏览',ingestBtn:'导入索引',forceReindex:'强制重建索引',
+    uploadFiles:'上传文件',dragDrop:'拖拽文件到此处或点击选择',
+    syncedDirs:'已同步目录',noSyncedDirs:'暂无同步目录',
+    indexedFiles:'已索引文件',processing:'处理中...',
+    embeddingModel:'Embedding 模型',whisperModel:'语音模型',llmModel:'对话模型',
+    download:'下载',downloaded:'已下载',notInstalled:'未安装',
+    checkUpdate:'检查更新',upToDate:'已是最新版本',updateAvailable:'有新版本可用',
+    shutdown:'关闭 KBase',shutdownConfirm:'确定关闭 KBase？',
+    stopped:'已停止',removed:'已清理',
   },
   en:{
     newChat:'New Chat',chat:'Chat',search:'Search',sql:'SQL',files:'Files',ingest:'Ingest',
-    connectors:'Connectors',settings:'Settings',exit:'Exit',
+    connectors:'Connectors',settings:'Settings',exit:'Exit',update:'Check Update',
     today:'Today',yesterday:'Yesterday',week:'Past 7 Days',older:'Older',
     searchPlaceholder:'Search your knowledge base...',askPlaceholder:'Ask your knowledge base...',
     searching:'Searching...',noResults:'No results',
     memory:'Memory',history:'History',clear:'Clear',
     save:'Save Settings',saved:'Saved!',
     knowledge:'Knowledge',web:'Web',hybrid:'Hybrid',research:'Research',deepThinking:'Deep Thinking',
+    addDir:'Add Directory',browse:'Browse',ingestBtn:'Ingest',forceReindex:'Force re-index',
+    uploadFiles:'Upload Files',dragDrop:'Drag & drop files here or click to select',
+    syncedDirs:'Synced Directories',noSyncedDirs:'No synced directories',
+    indexedFiles:'Indexed Files',processing:'Processing...',
+    embeddingModel:'Embedding Model',whisperModel:'Whisper Model',llmModel:'LLM Model',
+    download:'Download',downloaded:'Downloaded',notInstalled:'Not installed',
+    checkUpdate:'Check for Updates',upToDate:'Up to date',updateAvailable:'Update available',
+    shutdown:'Shutdown KBase',shutdownConfirm:'Shutdown KBase?',
+    stopped:'Stopped',removed:'Cleaned up',
   },
 };
 function t(key){return (I18N[curLang]||I18N.en)[key]||key;}

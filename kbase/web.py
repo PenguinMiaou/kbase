@@ -89,6 +89,28 @@ def create_app(workspace: str = "default") -> FastAPI:
         finally:
             store.close()
 
+    @app.get("/api/browse-dir")
+    def api_browse_dir():
+        """Open native directory picker dialog."""
+        import threading, queue as _queue
+        q = _queue.Queue()
+        def pick():
+            try:
+                import tkinter as tk
+                from tkinter import filedialog
+                root = tk.Tk()
+                root.withdraw()
+                root.attributes('-topmost', True)
+                path = filedialog.askdirectory(title="Select folder to index")
+                root.destroy()
+                q.put(path or "")
+            except Exception:
+                q.put("")
+        t = threading.Thread(target=pick)
+        t.start()
+        t.join(timeout=120)
+        return {"path": q.get(timeout=1) if not q.empty() else ""}
+
     @app.post("/api/ingest")
     def api_ingest(directory: str = Form(...), force: bool = Form(False)):
         store = get_store()

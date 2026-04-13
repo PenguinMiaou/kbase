@@ -104,6 +104,18 @@ def ingest_directory(
             stats["failed"] += 1
             stats["errors"].append({"file": fp, "error": str(e)})
 
+    # Clean up: remove index entries for files that no longer exist in this directory
+    existing_paths = {str(f) for f in files}
+    indexed_files = store.list_files(str(dir_path))
+    removed = 0
+    for indexed in indexed_files:
+        fp = indexed.get("file_path", "")
+        if fp and fp.startswith(str(dir_path)) and fp not in existing_paths:
+            if not Path(fp).exists():
+                store.remove_file(fp)
+                removed += 1
+
+    stats["removed"] = removed
     stats["elapsed_seconds"] = round(time.time() - stats["start_time"], 1)
     return stats
 
