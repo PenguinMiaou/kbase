@@ -52,22 +52,22 @@ def main():
         from AppKit import NSApplication, NSApp, NSMenu, NSMenuItem, NSStatusBar
 
         app = NSApplication.sharedApplication()
-        # This makes the app appear in the Dock
-        app.setActivationPolicy_(0)  # NSApplicationActivationPolicyRegular = 0
+        # Accessory mode: shows in menu bar, not in Dock (avoids bouncing icon issue)
+        app.setActivationPolicy_(1)  # NSApplicationActivationPolicyAccessory = 1
 
-        # Create a minimal menu bar
-        menubar = NSMenu.new()
-        app_menu_item = NSMenuItem.new()
-        menubar.addItem_(app_menu_item)
-        app.setMainMenu_(menubar)
+        # Create status bar item (menu bar icon)
+        status_bar = NSStatusBar.systemStatusBar()
+        status_item = status_bar.statusItemWithLength_(-1)  # NSVariableStatusItemLength
+        status_item.setTitle_("KB")
 
-        app_menu = NSMenu.new()
-        app_menu.addItemWithTitle_action_keyEquivalent_("Open Browser", "openBrowser:", "o")
-        app_menu.addItem_(NSMenuItem.separatorItem())
-        app_menu.addItemWithTitle_action_keyEquivalent_("Quit KBase", "terminate:", "q")
-        app_menu_item.setSubmenu_(app_menu)
+        # Status bar menu
+        menu = NSMenu.new()
+        menu.addItemWithTitle_action_keyEquivalent_("Open KBase in Browser", "openBrowser:", "")
+        menu.addItem_(NSMenuItem.separatorItem())
+        menu.addItemWithTitle_action_keyEquivalent_("Quit KBase", "terminate:", "q")
+        status_item.setMenu_(menu)
 
-        # Delegate to handle menu actions
+        # Delegate
         class AppDelegate(NSObject):
             def openBrowser_(self, sender):
                 webbrowser.open("http://127.0.0.1:8765/")
