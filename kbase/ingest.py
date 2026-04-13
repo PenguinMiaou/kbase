@@ -10,6 +10,7 @@ from kbase.config import SUPPORTED_EXTENSIONS
 from kbase.extract import extract_file
 from kbase.chunk import chunk_document
 from kbase.store import KBaseStore
+from kbase.enhance import clean_text, deduplicate_chunks_cross_file
 from kbase.enhance import enrich_chunk_context, segment_text
 
 # Global control signals for pause/stop
@@ -121,6 +122,9 @@ def ingest_directory(
                 store.index_document(fp, "", [], [], result["metadata"])
                 continue
 
+            # Clean: normalize whitespace, remove headers/footers/watermarks
+            result["text"] = clean_text(result["text"])
+
             # Chunk
             chunks = chunk_document(
                 result["text"],
@@ -132,8 +136,16 @@ def ingest_directory(
                 },
             )
 
-            # Contextual enrichment: prepend document context to each chunk
+            # Dedup: remove near-duplicate chunks from older file versions
+            before_dedup = len(chunks)
+            chunks = deduplicate_chunks_cross_file(store, chunks, fp)
+            if len(chunks) < before_dedup:
+                stats.setdefault("chunks_deduped", 0)
+                stats["chunks_deduped"] += before_dedup - len(chunks)
+
+            # Contextual enrichment: clean + prepend document context to each chunk
             for chunk in chunks:
+                chunk["text"] = clean_text(chunk["text"])
                 chunk["text"] = enrich_chunk_context(
                     chunk["text"], file_path.name, chunk.get("metadata", {})
                 )

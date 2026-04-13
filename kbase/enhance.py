@@ -265,6 +265,123 @@ def rerank_results(query: str, results: list, top_k: int = 10) -> list:
 # 4. Contextual Chunk Enrichment
 # ============================================================
 
+def clean_text(text: str) -> str:
+    """Clean text before embedding — remove noise that hurts retrieval quality.
+
+    Applied in the Transform stage of the PTI pipeline (RAGFlow-inspired):
+    1. Normalize whitespace (collapse multiple newlines/spaces)
+    2. Remove zero-width and control characters
+    3. Remove repeated headers/footers (common in PDF extraction)
+    4. Strip page numbers and watermarks
+    """
+    if not text:
+        return text
+
+    # Remove zero-width chars and control chars (except newline/tab)
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u200b\u200c\u200d\ufeff\u00ad]', '', text)
+
+    # Collapse 3+ consecutive newlines to 2
+    text = re.sub(r'\n{3,}', '\n\n', text)
+
+    # Collapse runs of spaces/tabs (but not newlines) to single space
+    text = re.sub(r'[^\S\n]{3,}', ' ', text)
+
+    # Remove standalone page numbers (e.g. "- 12 -", "Page 12", "第12页")
+    text = re.sub(r'^[\s]*[-–—]\s*\d+\s*[-–—][\s]*$', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^[\s]*(?:Page|page|PAGE|第)\s*\d+\s*(?:页)?[\s]*$', '', text, flags=re.MULTILINE)
+
+    # Remove common watermark patterns (repeated company disclaimers)
+    text = re.sub(r'^[\s]*(CONFIDENTIAL|DRAFT|机密|内部资料|仅供参考)[\s]*$', '', text, flags=re.MULTILINE | re.IGNORECASE)
+
+    # Remove repeated header/footer lines: if same line appears 3+ times, it's a header/footer
+    lines = text.split('\n')
+    if len(lines) > 20:
+        from collections import Counter
+        line_counts = Counter(line.strip() for line in lines if len(line.strip()) > 3)
+        repeated = {line for line, count in line_counts.items() if count >= 3}
+        if repeated:
+            lines = [line for line in lines if line.strip() not in repeated]
+            text = '\n'.join(lines)
+
+    return text.strip()
+
+
+def deduplicate_chunks_cross_file(store, chunks: list[dict], file_path: str, threshold: float = 0.85) -> list[dict]:
+    """Remove chunks that are near-duplicates of existing chunks from OTHER files.
+
+    Key insight: in personal work directories, files have multiple versions
+    (v1, v2, v3). We keep the NEWEST version's chunks and skip duplicates
+    from older files.
+
+    Args:
+        store: KBaseStore with existing indexed data
+        chunks: new chunks to be indexed
+        file_path: path of the file being indexed
+        threshold: similarity threshold for dedup (0-1)
+    Returns:
+        filtered chunks with near-duplicates removed
+    """
+    from difflib import SequenceMatcher
+    from pathlib import Path
+    import time
+
+    if not chunks or len(chunks) < 2:
+        return chunks
+
+    # Get current file's modified time
+    try:
+        current_mtime = Path(file_path).stat().st_mtime
+    except Exception:
+        current_mtime = time.time()
+
+    # Sample existing chunks from DB for comparison (limit to avoid slowness)
+    try:
+        c = store.conn.cursor()
+        c.execute("""
+            SELECT fc.text, f.file_path, f.modified_time
+            FROM fts_chunks fc
+            JOIN files f ON fc.file_id = f.file_id
+            WHERE f.file_path != ?
+            ORDER BY f.modified_time DESC
+            LIMIT 500
+        """, (file_path,))
+        existing = [(row["text"], row["file_path"], row["modified_time"]) for row in c.fetchall()]
+    except Exception:
+        return chunks  # Can't query, skip dedup
+
+    if not existing:
+        return chunks
+
+    # Build a quick lookup of existing chunk text snippets (first 200 chars for speed)
+    existing_snippets = [(text[:200], mtime) for text, _, mtime in existing]
+
+    kept = []
+    removed = 0
+    for chunk in chunks:
+        chunk_snippet = chunk["text"][:200]
+        is_dup = False
+        for ex_snippet, ex_mtime in existing_snippets:
+            ratio = SequenceMatcher(None, chunk_snippet, ex_snippet).ratio()
+            if ratio >= threshold:
+                # Duplicate found — keep only if current file is newer
+                if current_mtime >= ex_mtime:
+                    # Current file is newer, keep this chunk (old one will be replaced on re-ingest)
+                    break
+                else:
+                    # Older file, skip this chunk
+                    is_dup = True
+                    break
+        if not is_dup:
+            kept.append(chunk)
+        else:
+            removed += 1
+
+    if removed > 0:
+        print(f"[KBase] Dedup: removed {removed} near-duplicate chunks from {Path(file_path).name} (older version)")
+
+    return kept
+
+
 def enrich_chunk_context(chunk_text: str, file_name: str, metadata: dict) -> str:
     """Add contextual prefix to chunk for better retrieval.
 
