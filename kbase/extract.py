@@ -7,9 +7,23 @@ from pathlib import Path
 from typing import Optional
 
 
+MAX_FILE_SIZE_MB = 200  # Skip files larger than this to prevent OOM
+
 def extract_file(file_path: str | Path) -> dict:
     """Extract text and tables from a file. Returns {text, tables, metadata}."""
     p = Path(file_path)
+
+    # Guard: skip extremely large files to prevent OOM
+    try:
+        size_mb = p.stat().st_size / (1024 * 1024)
+        if size_mb > MAX_FILE_SIZE_MB:
+            return {
+                "text": f"[File too large: {size_mb:.0f}MB, max {MAX_FILE_SIZE_MB}MB]",
+                "tables": [],
+                "metadata": {"type": p.suffix, "error": f"File too large ({size_mb:.0f}MB)", "file_size": p.stat().st_size},
+            }
+    except OSError:
+        pass
     ext = p.suffix.lower()
     extractors = {
         ".md": _extract_markdown,

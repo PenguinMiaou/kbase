@@ -186,6 +186,11 @@ class KBaseStore:
                 FOREIGN KEY (file_id) REFERENCES files(file_id)
             )
         """)
+        # Performance indexes for large datasets (300GB+ / 100K+ files)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_files_path ON files(file_path)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_files_source_dir ON files(source_dir)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_files_type ON files(file_type)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_files_name ON files(file_name)")
         self.conn.commit()
 
     def file_id(self, file_path: str) -> str:

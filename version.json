@@ -1,5 +1,5 @@
 {
-  "version": "0.1.1",
+  "version": "0.2.0",
   "download_url": "https://github.com/PenguinMiaou/kbase/releases/latest",
-  "changelog": "Add Qwen CLI, fix model status Checking bug, fix chat error handling, add auto-update, fix ChromaDB packaging"
+  "changelog": "v0.2.0: Model download UI, directory browser, ingest progress bar, i18n, dark mode fixes, research stop button, file cleanup"
 }

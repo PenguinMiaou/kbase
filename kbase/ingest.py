@@ -24,19 +24,24 @@ def ingest_directory(
     if not dir_path.is_dir():
         return {"error": f"Not a directory: {directory}"}
 
-    # Collect all supported files
+    # Collect all supported files (max depth 15 to handle deep nesting)
+    NOISE_DIRS = {
+        "__pycache__", "node_modules", ".venv", ".git", ".svn",
+        "$RECYCLE.BIN", "System Volume Information", ".Trash",
+        "~$", ".tmp", "Thumbs.db",
+    }
     files = []
     for ext in SUPPORTED_EXTENSIONS:
-        files.extend(dir_path.rglob(f"*{ext}"))
-
-    # Filter out hidden dirs and common noise
-    files = [
-        f for f in files
-        if not any(part.startswith(".") for part in f.parts)
-        and "__pycache__" not in str(f)
-        and "node_modules" not in str(f)
-        and ".venv" not in str(f)
-    ]
+        for f in dir_path.rglob(f"*{ext}"):
+            # Filter: hidden dirs, noise dirs, max depth
+            parts = f.relative_to(dir_path).parts
+            if len(parts) > 15:
+                continue  # Too deeply nested
+            if any(part.startswith(".") or part.startswith("~$") for part in parts):
+                continue
+            if any(noise in str(f) for noise in NOISE_DIRS):
+                continue
+            files.append(f)
 
     stats = {
         "total": len(files),
