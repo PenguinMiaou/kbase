@@ -617,6 +617,8 @@ async function newChat(){
   chatTurns=0;updateMemory();closeArtifact();
   convTitle='';convTitleManual=false;
   updateSessionTitle('');
+  switchTab('chat');
+  const ci=document.getElementById('chat-input');if(ci)ci.focus();
 }
 
 async function clearChat(){
