@@ -227,4 +227,4 @@ python -m kbase.web     # Dev server at :8765
 
 ## License
 
-Copyright@PenguinMiaou. All rights reserved.
+[MIT License](LICENSE) - use it however you want.

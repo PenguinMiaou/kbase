@@ -4,7 +4,7 @@ setup(
     name="kbase",
     version="0.3.0",
     author="PenguinMiaou",
-    license="Copyright@PenguinMiaou",
+    license="MIT",
     packages=find_packages(),
     install_requires=[
         "chromadb>=0.5.0",
