@@ -1,5 +1,5 @@
 {
   "version": "0.3.0",
   "download_url": "https://github.com/PenguinMiaou/kbase/releases/latest",
-  "changelog": "v0.3.0: Vision LLM image description (8 models), auto-glossary, adaptive search, parent-child chunks, HyDE, osascript browse"
+  "changelog": "v0.3.0: Vision LLM (8 models), multi-engine search (6 engines), auto-glossary, adaptive search, HyDE, parent-child chunks, Settings i18n"
 }
