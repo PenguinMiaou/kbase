@@ -143,7 +143,7 @@ Auto-routes by language: Chinese queries hit Bing CN + DuckDuckGo, English queri
 | <img src="docs/screenshots/search-filter.png" width="400"> | <img src="docs/screenshots/graph-local.png" width="400"> |
 | **Ingest Progress** | **File Manager** |
 | <img src="docs/screenshots/ingest.png" width="400"> | <img src="docs/screenshots/file-list.png" width="400"> |
-| **Settings - LLM** | **Settings - Buddy** |
+| **Settings - Buddy** | **Settings - LLM** |
 | <img src="docs/screenshots/settings1.png" width="400"> | <img src="docs/screenshots/settings2.png" width="400"> |
 
 - 3-column layout with artifact panel for research reports
