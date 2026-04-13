@@ -381,16 +381,16 @@
         <select class="ctrl-select" id="llm-select"></select>
         <select class="ctrl-select" id="buddy-select"></select>
         <div style="display:flex;gap:4px;" id="mode-btns">
-          <button class="mode-btn active" data-mode="kb" onclick="setMode('kb')" title="Knowledge Base — Search only your local indexed files">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>Knowledge</button>
-          <button class="mode-btn" data-mode="web" onclick="setMode('web')" title="Web Search — Search the internet via DuckDuckGo">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/></svg>Web</button>
-          <button class="mode-btn" data-mode="hybrid" onclick="setMode('hybrid')" title="Hybrid — Combine local KB + web results for comprehensive answers">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5M8 3H3v5M21 3l-7 7M3 3l7 7"/></svg>Hybrid</button>
-          <button class="mode-btn" data-mode="research" onclick="setMode('research')" title="Research — Multi-step deep research with iterative search and synthesis">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg>Research</button>
           <button class="mode-btn" data-mode="direct" onclick="setMode('direct')" title="Direct Chat — No search, just talk with AI + global memory">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>Direct</button>
+          <button class="mode-btn active" data-mode="kb" onclick="setMode('kb')" title="Knowledge Base — Search only your local indexed files">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>Knowledge</button>
+          <button class="mode-btn" data-mode="web" onclick="setMode('web')" title="Web Search — Search the internet">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/></svg>Web</button>
+          <button class="mode-btn" data-mode="hybrid" onclick="setMode('hybrid')" title="Hybrid — Local KB + Web combined">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5M8 3H3v5M21 3l-7 7M3 3l7 7"/></svg>Hybrid</button>
+          <button class="mode-btn" data-mode="research" onclick="setMode('research')" title="Research — Multi-round deep research with synthesis">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg>Research</button>
         </div>
         <div class="toggle-deep" id="deep-toggle" onclick="toggleDeep()" title="Deep Thinking — Enable streaming deep research with real-time progress tracking">
           <div class="toggle-track"></div>
