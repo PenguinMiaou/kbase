@@ -397,8 +397,12 @@ def chat(store: KBaseStore, question: str, settings: dict = None,
     source_files = []
     web_sources = []
 
+    # Direct mode: no search, just chat with memory
+    if search_mode == "direct":
+        pass  # Skip all retrieval, just use memory + conversation history
+
     # KB search (for kb, hybrid, research modes)
-    if search_mode in ("kb", "hybrid", "research"):
+    elif search_mode in ("kb", "hybrid", "research"):
         # Create lightweight LLM func for HyDE/Multi-Query (optional, enhances search)
         def _search_llm(prompt):
             try:
