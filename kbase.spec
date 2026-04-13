@@ -52,6 +52,7 @@ a = Analysis(
         'chromadb.db', 'chromadb.db.impl', 'chromadb.db.impl.sqlite',
         'chromadb.migrations', 'chromadb.auth',
         'posthog', 'onnxruntime', 'tokenizers',
+        'objc', 'AppKit', 'Foundation',
         'jieba', 'jieba.posseg', 'jieba.analyse',
         'pptx', 'docx', 'openpyxl', 'fitz',
         'click', 'rich', 'watchdog',
