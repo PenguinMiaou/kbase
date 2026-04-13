@@ -16,6 +16,8 @@ from kbase.enhance import enrich_chunk_context, segment_text
 # Global control signals for pause/stop
 _ingest_stop = threading.Event()
 _ingest_pause = threading.Event()
+_ingest_active = False  # True while ingest is running
+_ingest_progress = {}   # {current, total, name, status} — last known progress
 
 
 def stop_ingest():
@@ -84,6 +86,9 @@ def ingest_directory(
     # Reset control signals
     _ingest_stop.clear()
     _ingest_pause.clear()
+    global _ingest_active, _ingest_progress
+    _ingest_active = True
+    _ingest_progress = {"current": 0, "total": len(files), "name": "", "status": "scanning"}
 
     for i, file_path in enumerate(sorted(files)):
         # Check stop signal
@@ -109,6 +114,7 @@ def ingest_directory(
                 progress_callback(i + 1, len(files), file_path.name, "skipped")
             continue
 
+        _ingest_progress = {"current": i + 1, "total": len(files), "name": file_path.name, "status": "processing"}
         if progress_callback:
             progress_callback(i + 1, len(files), file_path.name, "processing")
 
@@ -243,6 +249,8 @@ def ingest_directory(
 
     stats["removed"] = removed
     stats["elapsed_seconds"] = round(time.time() - stats["start_time"], 1)
+    _ingest_active = False
+    _ingest_progress = {"current": 0, "total": 0, "name": "", "status": "done"}
     return stats
 
 

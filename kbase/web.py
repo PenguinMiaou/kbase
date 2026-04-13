@@ -289,6 +289,12 @@ def create_app(workspace: str = "default") -> FastAPI:
         resume_ingest()
         return {"status": "resumed"}
 
+    @app.get("/api/ingest/status")
+    def api_ingest_status():
+        """Check if an ingest is currently running (for page restore after refresh)."""
+        from kbase.ingest import _ingest_active, _ingest_progress
+        return {"active": _ingest_active, "progress": _ingest_progress}
+
     @app.get("/api/ingest-stream")
     def api_ingest_stream(directory: str = Query(...), force: bool = Query(False)):
         """SSE endpoint for real-time ingest progress."""

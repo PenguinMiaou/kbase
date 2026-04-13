@@ -143,11 +143,27 @@ class KBaseStore:
         self.chroma_client = chromadb.PersistentClient(path=str(chroma_path))
 
         self.ef = _create_embedding_function(self.embedding_model)
-        self.collection = self.chroma_client.get_or_create_collection(
-            name="documents",
-            embedding_function=self.ef,
-            metadata={"hnsw:space": "cosine"},
-        )
+        try:
+            self.collection = self.chroma_client.get_or_create_collection(
+                name="documents",
+                embedding_function=self.ef,
+                metadata={"hnsw:space": "cosine"},
+            )
+        except (ValueError, Exception) as e:
+            # Embedding function conflict — delete and recreate collection
+            if "conflict" in str(e).lower() or "embedding" in str(e).lower():
+                print(f"[KBase] ChromaDB embedding conflict, rebuilding collection: {e}")
+                try:
+                    self.chroma_client.delete_collection("documents")
+                except Exception:
+                    pass
+                self.collection = self.chroma_client.get_or_create_collection(
+                    name="documents",
+                    embedding_function=self.ef,
+                    metadata={"hnsw:space": "cosine"},
+                )
+            else:
+                raise
 
         # Dimension mismatch detection: if user switched embedding model,
         # the existing ChromaDB collection has wrong dimensions.

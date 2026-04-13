@@ -233,7 +233,7 @@ function switchTab(name){
 
   // Load data for tab
   if(name==='files')loadFileList();
-  if(name==='ingest')loadIngestDirs();
+  if(name==='ingest'){loadIngestDirs();checkIngestStatus();}
   if(name==='connectors')loadConnectorList();
   if(name==='settings')loadSettingsPanel();
   if(name==='graph'){/* handled by patch below */}
@@ -1144,6 +1144,45 @@ async function removeFile(path){
 }
 
 // === Ingest Tab ===
+// Check if ingest is running (restore progress bar after refresh)
+async function checkIngestStatus(){
+  try{
+    const d=await api('/api/ingest/status');
+    if(d.active&&d.progress&&d.progress.total>0){
+      const p=d.progress;
+      const el=document.getElementById('ingest-result');
+      if(el&&!el.querySelector('#ingest-bar')){
+        const pct=Math.round(p.current/p.total*100);
+        el.innerHTML=`<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <span style="font-size:12px;color:var(--accent);" id="ingest-status">Processing (${p.current}/${p.total})</span>
+            <span style="font-size:11px;color:var(--text-muted);" id="ingest-count">${pct}%</span>
+          </div>
+          <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;">
+            <div id="ingest-bar" style="height:100%;width:${pct}%;background:var(--accent);border-radius:2px;transition:width 0.3s;"></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px;" id="ingest-file">${esc(p.name||'')}</div>
+        </div>`;
+        // Poll for updates
+        const poll=setInterval(async()=>{
+          try{
+            const s=await api('/api/ingest/status');
+            if(!s.active){clearInterval(poll);loadStats();loadIngestDirs();
+              const bar=document.getElementById('ingest-bar');if(bar){bar.style.width='100%';bar.style.background='var(--green)';}
+              const st=document.getElementById('ingest-status');if(st)st.innerHTML='<span style="color:var(--green)">Done</span>';
+              return;}
+            const pp=s.progress;const pc=Math.round(pp.current/pp.total*100);
+            const bar=document.getElementById('ingest-bar');if(bar)bar.style.width=pc+'%';
+            const st=document.getElementById('ingest-status');if(st)st.textContent=`Processing (${pp.current}/${pp.total})`;
+            const ct=document.getElementById('ingest-count');if(ct)ct.textContent=pc+'%';
+            const fn=document.getElementById('ingest-file');if(fn)fn.textContent=pp.name||'';
+          }catch(_){clearInterval(poll);}
+        },2000);
+      }
+    }
+  }catch(_){}
+}
+
 async function loadIngestDirs(){
   const el=document.getElementById('ingest-dir-list');
   if(!el)return;
