@@ -10,16 +10,47 @@ echo      Local Knowledge Base System
 echo   ========================================
 echo.
 
-REM Check Python
+REM Check Python — auto-install if missing
 echo [1/5] Checking Python...
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo   ERROR: Python not found!
-    echo   Download from: https://www.python.org/downloads/
-    echo   Make sure to check "Add Python to PATH" during install.
-    pause
-    exit /b 1
+    echo   Python not found. Attempting auto-install...
+    where winget >nul 2>&1
+    if not errorlevel 1 (
+        echo   Installing Python 3.11 via winget...
+        winget install --id Python.Python.3.11 -e --accept-source-agreements --accept-package-agreements
+        echo.
+        echo   Python installed. Refreshing PATH...
+        REM Refresh PATH to pick up newly installed Python
+        set "PATH=%LOCALAPPDATA%\Programs\Python\Python311\;%LOCALAPPDATA%\Programs\Python\Python311\Scripts\;%PATH%"
+        python --version >nul 2>&1
+        if errorlevel 1 (
+            echo   ERROR: Python still not found after install.
+            echo   Please close this window, reopen a new terminal, and run install.bat again.
+            pause
+            exit /b 1
+        )
+    ) else (
+        echo   winget not available. Downloading Python installer...
+        powershell -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile '%TEMP%\python-installer.exe'"
+        if exist "%TEMP%\python-installer.exe" (
+            echo   Running Python installer (please follow the prompts)...
+            echo   IMPORTANT: Check "Add Python to PATH" at the bottom!
+            "%TEMP%\python-installer.exe" InstallAllUsers=0 PrependPath=1
+            del "%TEMP%\python-installer.exe"
+            echo.
+            echo   Python installed. Please close this window, reopen a new terminal, and run install.bat again.
+            pause
+            exit /b 0
+        ) else (
+            echo   ERROR: Failed to download Python.
+            echo   Please install manually from: https://www.python.org/downloads/
+            pause
+            exit /b 1
+        )
+    )
 )
+echo   Python found:
 python --version
 
 REM Get script directory
