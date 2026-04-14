@@ -41,9 +41,10 @@ REM Install dependencies
 echo [3/5] Installing dependencies (this may take a few minutes)...
 pip install --upgrade pip -q 2>nul
 echo   Installing core packages...
-pip install -e "%SCRIPT_DIR%" -q
+cd /d "%SCRIPT_DIR%"
+pip install -e . -q
 echo   Installing search enhancements...
-pip install jieba FlagEmbedding -q
+pip install jieba -q
 echo   Dependencies installed
 
 REM Create CLI wrapper
