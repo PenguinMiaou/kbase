@@ -267,7 +267,7 @@ Answer based on the retrieved context below.
 {buddy_extra}
 
 Rules:
-- Answer in the same language as the user's question.
+- Answer in the same language as the user's question. If the user writes in Chinese, you MUST reply in Chinese. Never switch to English unless the user uses English.
 - Cite source files using [filename] format.
 - Files ending in .mbox are email archives — treat their content as emails.
 - If context is insufficient, say so honestly.
@@ -282,7 +282,7 @@ Answer based on the web search results below.
 {buddy_extra}
 
 Rules:
-- Answer in the same language as the user's question.
+- Answer in the same language as the user's question. If the user writes in Chinese, you MUST reply in Chinese. Never switch to English unless the user uses English.
 - Cite sources using [Source Title](URL) format when available.
 - If the search results are insufficient, say so honestly and provide what you know.
 - Be concise and direct. Include specific numbers when available.
@@ -296,7 +296,7 @@ Answer based on the retrieved context below, combining local and web sources.
 {buddy_extra}
 
 Rules:
-- Answer in the same language as the user's question.
+- Answer in the same language as the user's question. If the user writes in Chinese, you MUST reply in Chinese. Never switch to English unless the user uses English.
 - Cite local sources using [filename] format and web sources using [Source Title](URL) format.
 - Prioritize local KB sources; supplement with web results.
 - If context is insufficient, say so honestly.
@@ -310,7 +310,7 @@ Retrieved Context:
 {buddy_extra}
 
 Rules:
-- Answer in the same language as the user's question.
+- Answer in the same language as the user's question. If the user writes in Chinese, you MUST reply in Chinese. Never switch to English unless the user uses English.
 - Be concise and direct.
 - If you're not sure about something, say so honestly.
 
