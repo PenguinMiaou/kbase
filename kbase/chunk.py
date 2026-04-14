@@ -155,7 +155,12 @@ def _chunk_by_headings(text: str, metadata: dict) -> list[dict]:
 
 
 def _chunk_table_text(text: str, metadata: dict) -> list[dict]:
-    """For spreadsheet text: keep sheet sections together."""
+    """For spreadsheet text: index headers + sample rows only (not every row).
+
+    Tables are best queried via SQL (Text2SQL), not semantic search.
+    We only embed enough for the search engine to FIND the right table,
+    not to retrieve every data row.
+    """
     sheets = re.split(r"(?=^## Sheet:)", text, flags=re.MULTILINE)
     chunks = []
     for sheet in sheets:
@@ -165,19 +170,32 @@ def _chunk_table_text(text: str, metadata: dict) -> list[dict]:
         sheet_match = re.match(r"## Sheet:\s*(.+)", sheet)
         sheet_name = sheet_match.group(1).strip() if sheet_match else ""
 
-        # Tables can be big - split if needed but try to keep rows together
-        if len(sheet) <= CHUNK_MAX_CHARS * 3:
+        lines = sheet.split('\n')
+
+        # For small sheets, keep as-is
+        if len(sheet) <= CHUNK_MAX_CHARS * 2:
             chunks.append({
                 "text": sheet,
                 "metadata": {**metadata, "sheet": sheet_name},
             })
         else:
-            sub_chunks = _split_text(sheet)
-            for j, sc in enumerate(sub_chunks):
-                chunks.append({
-                    "text": sc,
-                    "metadata": {**metadata, "sheet": sheet_name, "sub_chunk": j},
-                })
+            # Large table: only index header + first 20 rows + summary
+            # This is enough for search to find the table; SQL handles the rest
+            header_lines = lines[:25]  # Headers + first ~20 data rows
+            tail_lines = lines[-5:] if len(lines) > 30 else []  # Last few rows for context
+
+            summary = (
+                f"## Sheet: {sheet_name}\n"
+                f"[Table with {len(lines)} rows]\n"
+                + '\n'.join(header_lines)
+            )
+            if tail_lines:
+                summary += f"\n...\n[{len(lines) - 30} more rows]\n" + '\n'.join(tail_lines)
+
+            chunks.append({
+                "text": summary[:CHUNK_MAX_CHARS * 2],
+                "metadata": {**metadata, "sheet": sheet_name},
+            })
     return chunks if chunks else [{"text": text[:CHUNK_MAX_CHARS], "metadata": metadata}]
 
 
