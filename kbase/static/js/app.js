@@ -2418,8 +2418,29 @@ const _origSwitchLang=switchLang;
 function switchLang(l){curLang=l;localStorage.setItem('kbase-ui-lang',l);applyI18n();broadcastSync('lang-changed',l);}
 
 // === Shutdown ===
+let _shutdownPending=false;
 async function shutdown(){
-  if(!confirm(curLang==='zh'?'确定关闭 KBase？':'Shutdown KBase?'))return;
+  if(!_shutdownPending){
+    // First click: change button to confirm state
+    _shutdownPending=true;
+    const btn=document.querySelector('[onclick="shutdown()"]');
+    if(btn){
+      btn.style.background='var(--red)';
+      btn.style.color='#fff';
+      btn.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M18.36 6.64a9 9 0 11-12.73 0"/><path d="M12 2v10"/></svg> '+(curLang==='zh'?'确认退出？':'Confirm?');
+    }
+    // Reset after 3 seconds if no second click
+    setTimeout(()=>{
+      _shutdownPending=false;
+      if(btn){
+        btn.style.background='none';
+        btn.style.color='var(--red)';
+        btn.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 11-12.73 0"/><path d="M12 2v10"/></svg> Exit';
+      }
+    },3000);
+    return;
+  }
+  // Second click: actually shutdown
   document.body.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:var(--text-muted);">'+(curLang==='zh'?'KBase 已停止。':'KBase stopped.')+'</div>';
   try{await fetch('/api/shutdown',{method:'POST'});}catch(e){}
 }
