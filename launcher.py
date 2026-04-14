@@ -217,12 +217,70 @@ def keep_alive_generic():
         pass
 
 
+def show_splash():
+    """Show a splash screen with KBase logo while server starts (Windows/Linux)."""
+    if IS_MACOS:
+        return None  # macOS has menu bar icon, no splash needed
+    try:
+        import tkinter as tk
+        from pathlib import Path
+
+        splash = tk.Tk()
+        splash.overrideredirect(True)  # No title bar
+        splash.attributes('-topmost', True)
+
+        # Center on screen
+        w, h = 360, 200
+        x = (splash.winfo_screenwidth() - w) // 2
+        y = (splash.winfo_screenheight() - h) // 2
+        splash.geometry(f'{w}x{h}+{x}+{y}')
+        splash.configure(bg='#1a1a2e')
+
+        # Try to load logo
+        logo_path = None
+        for p in [
+            Path(__file__).parent / 'kbase' / 'static' / 'logos' / 'kbase-logo.svg',
+            Path(getattr(sys, '_MEIPASS', '.')) / 'kbase' / 'static' / 'logos' / 'kbase-logo.svg',
+        ]:
+            if p.exists():
+                logo_path = p
+                break
+
+        # Title
+        tk.Label(splash, text='KBase', font=('Segoe UI', 28, 'bold'),
+                 fg='#818cf8', bg='#1a1a2e').pack(pady=(30, 5))
+        tk.Label(splash, text='Local Knowledge Base',
+                 font=('Segoe UI', 11), fg='#94a3b8', bg='#1a1a2e').pack()
+
+        # Progress
+        status_label = tk.Label(splash, text='Starting server...',
+                                font=('Segoe UI', 9), fg='#64748b', bg='#1a1a2e')
+        status_label.pack(pady=(20, 5))
+
+        # Animated dots
+        dot_count = [0]
+        def animate():
+            dot_count[0] = (dot_count[0] + 1) % 4
+            dots = '.' * dot_count[0]
+            status_label.config(text=f'Starting server{dots}')
+            splash.after(500, animate)
+        animate()
+
+        splash.update()
+        return splash
+    except Exception:
+        return None
+
+
 def main():
     status = check_existing_instance()
     if status == "healthy":
         open_existing_browser()
     elif status == "zombie":
         kill_zombie()
+
+    # Show splash screen while starting
+    splash = show_splash()
 
     # Check LibreOffice (background install if missing)
     check_libreoffice()
@@ -231,8 +289,38 @@ def main():
     server_proc = multiprocessing.Process(target=start_server, daemon=True)
     server_proc.start()
 
-    # Open browser
-    open_browser()
+    # Open browser (closes splash when ready)
+    def _open_and_close_splash():
+        import urllib.request
+        for _ in range(30):
+            try:
+                urllib.request.urlopen("http://127.0.0.1:8765/", timeout=1)
+                webbrowser.open("http://127.0.0.1:8765/")
+                if splash:
+                    try:
+                        splash.destroy()
+                    except Exception:
+                        pass
+                return
+            except Exception:
+                time.sleep(0.5)
+    import threading
+    threading.Thread(target=_open_and_close_splash, daemon=True).start()
+
+    # Keep splash alive until server ready (Windows needs mainloop for tkinter)
+    if splash:
+        def check_server():
+            try:
+                import urllib.request
+                urllib.request.urlopen("http://127.0.0.1:8765/", timeout=1)
+                splash.destroy()
+            except Exception:
+                splash.after(500, check_server)
+        splash.after(1000, check_server)
+        try:
+            splash.mainloop()
+        except Exception:
+            pass
 
     try:
         if IS_MACOS:
