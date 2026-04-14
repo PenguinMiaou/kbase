@@ -117,14 +117,14 @@ echo ============================================
 echo.
 echo   Quick Start:
 echo.
-echo   1. Index your files:
-echo      kbase ingest C:\path\to\your\files
-echo.
-echo   2. Search:
-echo      kbase search "your question"
-echo.
-echo   3. Launch Web UI:
-echo      kbase web
+echo   1. Launch Web UI:
+echo      .\kbase.bat web
 echo      Then open http://localhost:8765
+echo.
+echo   2. Index your files:
+echo      .\kbase.bat ingest C:\path\to\your\files
+echo.
+echo   3. Search:
+echo      .\kbase.bat search "your question"
 echo.
 pause
