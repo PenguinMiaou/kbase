@@ -2420,6 +2420,11 @@ function switchLang(l){curLang=l;localStorage.setItem('kbase-ui-lang',l);applyI1
 // === Shutdown ===
 async function shutdown(){
   if(!confirm('Shutdown KBase?'))return;
+  // If running inside Tauri, use quit_app command
+  if(window.__TAURI__){
+    try{await window.__TAURI__.core.invoke('quit_app');}catch(e){}
+    return;
+  }
   try{await fetch('/api/shutdown',{method:'POST'});}catch(e){}
   document.body.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:var(--text-muted);">KBase stopped. Close this tab.</div>';
 }

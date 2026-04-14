@@ -225,6 +225,17 @@ async fn check_python_ready() -> bool {
 }
 
 #[tauri::command]
+async fn quit_app(app: tauri::AppHandle) {
+    // Kill Python server, then exit Tauri
+    if let Some(state) = app.try_state::<PythonProcess>() {
+        if let Some(mut child) = state.0.lock().unwrap().take() {
+            let _ = child.start_kill();
+        }
+    }
+    app.exit(0);
+}
+
+#[tauri::command]
 async fn run_setup(app: tauri::AppHandle) -> Result<String, String> {
     run_online_setup(app).await?;
     Ok("ok".to_string())
@@ -240,6 +251,7 @@ fn main() {
             get_server_url,
             check_python_ready,
             run_setup,
+            quit_app,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -295,13 +307,14 @@ fn main() {
         .expect("error while building tauri application")
         .run(|app, event| match event {
             RunEvent::WindowEvent {
-                label,
-                event: WindowEvent::CloseRequested { api, .. },
+                event: WindowEvent::CloseRequested { .. },
                 ..
-            } if label == "main" => {
-                api.prevent_close();
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.hide();
+            } => {
+                // Close window = quit app (kill Python server too)
+                if let Some(state) = app.try_state::<PythonProcess>() {
+                    if let Some(mut child) = state.0.lock().unwrap().take() {
+                        let _ = child.start_kill();
+                    }
                 }
             }
             RunEvent::ExitRequested { .. } => {
