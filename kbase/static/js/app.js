@@ -1153,15 +1153,28 @@ async function checkIngestStatus(){
       const el=document.getElementById('ingest-result');
       if(el&&!el.querySelector('#ingest-bar')){
         const pct=Math.round(p.current/p.total*100);
-        el.innerHTML=`<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:8px;">
+        const isPaused=p.status==='paused';
+        const statusLabel=isPaused?'Paused':'Processing';
+        const statusColor=isPaused?'var(--yellow)':'var(--accent)';
+        const etaLeft=p.total>0?`~${Math.round((p.total-p.current)*3/60)}m left`:'';
+        el.innerHTML=`<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:8px;min-height:80px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-            <span style="font-size:12px;color:var(--accent);" id="ingest-status">Processing (${p.current}/${p.total})</span>
-            <span style="font-size:11px;color:var(--text-muted);" id="ingest-count">${pct}%</span>
+            <span style="font-size:12px;color:${statusColor};" id="ingest-status">${statusLabel} (${p.current}/${p.total})</span>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span style="font-size:11px;color:var(--text-muted);" id="ingest-count">${pct}%</span>
+              <span style="font-size:10px;color:var(--text-muted);" id="ingest-eta">${etaLeft}</span>
+            </div>
           </div>
           <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;">
-            <div id="ingest-bar" style="height:100%;width:${pct}%;background:var(--accent);border-radius:2px;transition:width 0.3s;"></div>
+            <div id="ingest-bar" style="height:100%;width:${pct}%;background:${statusColor};border-radius:2px;transition:width 0.3s;"></div>
           </div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:4px;" id="ingest-file">${esc(p.name||'')}</div>
+          <div style="display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;margin-top:6px;height:24px;">
+            <div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="ingest-file">${esc(p.name||'')}</div>
+            <div style="display:flex;gap:4px;flex-shrink:0;">
+              <button onclick="toggleIngestPause()" id="ingest-pause-btn" style="padding:3px 10px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--card);color:var(--text);cursor:pointer;">${isPaused?'Resume':'Pause'}</button>
+              <button onclick="stopIngest()" style="padding:3px 10px;font-size:11px;border:1px solid var(--red,#dc2626);border-radius:5px;background:none;color:var(--red,#dc2626);cursor:pointer;">Stop</button>
+            </div>
+          </div>
         </div>`;
         // Poll for updates
         const poll=setInterval(async()=>{
@@ -1172,10 +1185,14 @@ async function checkIngestStatus(){
               const st=document.getElementById('ingest-status');if(st)st.innerHTML='<span style="color:var(--green)">Done</span>';
               return;}
             const pp=s.progress;const pc=Math.round(pp.current/pp.total*100);
-            const bar=document.getElementById('ingest-bar');if(bar)bar.style.width=pc+'%';
-            const st=document.getElementById('ingest-status');if(st)st.textContent=`Processing (${pp.current}/${pp.total})`;
+            const paused=pp.status==='paused';
+            const bar=document.getElementById('ingest-bar');if(bar){bar.style.width=pc+'%';bar.style.background=paused?'var(--yellow)':'var(--accent)';}
+            const st=document.getElementById('ingest-status');if(st){st.textContent=`${paused?'Paused':'Processing'} (${pp.current}/${pp.total})`;st.style.color=paused?'var(--yellow)':'var(--accent)';}
             const ct=document.getElementById('ingest-count');if(ct)ct.textContent=pc+'%';
             const fn=document.getElementById('ingest-file');if(fn)fn.textContent=pp.name||'';
+            const pbtn=document.getElementById('ingest-pause-btn');if(pbtn)pbtn.textContent=paused?'Resume':'Pause';
+            // Refresh stats periodically
+            if(pc%10===0)loadStats();
           }catch(_){clearInterval(poll);}
         },2000);
       }
@@ -1219,6 +1236,7 @@ async function toggleDir(el,path,enabled){
   await api('/api/ingest-dirs/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path,enabled})});
   el.classList.toggle('on',enabled);
   loadIngestDirs();
+  loadStats();
 }
 
 async function removeDir(path){

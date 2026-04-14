@@ -423,22 +423,41 @@ def create_app(workspace: str = "default") -> FastAPI:
 
     @app.get("/api/ingest-dirs")
     def api_ingest_dirs():
-        """List tracked ingested directories with status."""
+        """List tracked ingested directories with status (file count from DB, not settings)."""
         settings_data = load_settings(workspace)
         dirs = settings_data.get("ingest_dirs", {})
         import time as _time
         now = _time.time()
         result = []
-        # Handle both dict and list formats
         if isinstance(dirs, list):
             dirs = {d: {"enabled": True} for d in dirs if isinstance(d, str)}
         if not isinstance(dirs, dict):
             dirs = {}
+
+        # Get real file counts from DB (not stale settings value)
+        dir_counts = {}
+        try:
+            store = get_store()
+            c = store.conn.cursor()
+            c.execute("SELECT source_dir, COUNT(*) as cnt FROM files WHERE error IS NULL OR error = '' GROUP BY source_dir")
+            for row in c.fetchall():
+                sd = row["source_dir"] or ""
+                for p in dirs:
+                    # Normalize: strip trailing slashes for comparison
+                    pn = p.rstrip("/").rstrip(os.sep)
+                    if sd == pn or sd.startswith(pn + "/") or sd.startswith(pn + os.sep):
+                        dir_counts[p] = dir_counts.get(p, 0) + row["cnt"]
+            store.close()
+        except Exception:
+            pass
+
         for path, info in dirs.items():
             if not isinstance(info, dict):
                 info = {"enabled": True}
-            elapsed = now - info.get("last_sync", 0)
-            if elapsed < 60:
+            last_sync = info.get("last_sync", 0)
+            if last_sync == 0:
+                ago = "Not synced yet"
+            elif (elapsed := now - last_sync) < 60:
                 ago = f"{int(elapsed)}s ago"
             elif elapsed < 3600:
                 ago = f"{int(elapsed/60)}m ago"
@@ -451,7 +470,7 @@ def create_app(workspace: str = "default") -> FastAPI:
                 "enabled": info.get("enabled", True),
                 "last_sync": info.get("last_sync", 0),
                 "ago": ago,
-                "file_count": info.get("file_count", 0),
+                "file_count": dir_counts.get(path, 0),
                 "status": info.get("status", "unknown"),
             })
         return {"dirs": result}

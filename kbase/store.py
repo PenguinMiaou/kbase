@@ -183,10 +183,13 @@ class KBaseStore:
 
             # Sample one embedding to get stored dimension
             sample = self.collection.peek(limit=1)
-            if not sample or not sample.get("embeddings") or len(sample["embeddings"]) == 0:
+            if not sample:
+                return
+            embs = sample.get("embeddings")
+            if embs is None or (hasattr(embs, '__len__') and len(embs) == 0):
                 return
 
-            stored_dim = len(sample["embeddings"][0])
+            stored_dim = len(embs[0])
 
             # Get expected dimension from current model
             model_info = EMBEDDING_MODELS.get(self.embedding_model, {})
@@ -627,6 +630,34 @@ class KBaseStore:
         # Normalize to 0-1
         return {fid: count / max_clicks for fid, count in scores.items()}
 
+    def get_disabled_dirs(self) -> list[str]:
+        """Get list of disabled directory paths from settings (always fresh, no cache)."""
+        try:
+            settings = load_settings(self.workspace)
+            dirs = settings.get("ingest_dirs", {})
+            if not isinstance(dirs, dict):
+                return []
+            return [p.rstrip("/").rstrip(os.sep) for p, info in dirs.items()
+                    if isinstance(info, dict) and not info.get("enabled", True)]
+        except Exception:
+            return []
+
+    def _is_path_disabled(self, file_path: str) -> bool:
+        """Check if a file path belongs to a disabled directory."""
+        disabled = self.get_disabled_dirs()
+        if not disabled:
+            return False
+        return any(file_path.startswith(d + "/") for d in disabled)
+
+    def _sql_disabled_filter(self, column: str = "source_dir") -> tuple:
+        """Return (SQL AND clause, params) to exclude disabled dirs."""
+        disabled = self.get_disabled_dirs()
+        if not disabled:
+            return ("", [])
+        clauses = " AND ".join(f"{column} NOT LIKE ?" for _ in disabled)
+        params = [d + "%" for d in disabled]
+        return (f" AND ({clauses})", params)
+
     # ---- Search methods ----
 
     def semantic_search(self, query: str, top_k: int = 10, file_type: str = None) -> list[dict]:
@@ -647,6 +678,8 @@ class KBaseStore:
                 "metadata": results["metadatas"][0][i],
                 "method": "semantic",
             })
+        # Filter out files from disabled directories
+        items = [r for r in items if not self._is_path_disabled(r.get("metadata", {}).get("file_path", ""))]
         return items
 
     def keyword_search(self, query: str, top_k: int = 10) -> list[dict]:
@@ -693,6 +726,8 @@ class KBaseStore:
                     },
                     "method": "keyword",
                 })
+            # Filter out files from disabled directories
+            items = [r for r in items if not self._is_path_disabled(r.get("metadata", {}).get("file_path", ""))]
             return items
         except sqlite3.OperationalError:
             return []
@@ -715,7 +750,7 @@ class KBaseStore:
                 """, (term, top_k))
                 for row in c.fetchall():
                     fpath = row["file_path"]
-                    if fpath in seen_files:
+                    if fpath in seen_files or self._is_path_disabled(fpath):
                         continue
                     seen_files.add(fpath)
                     # Get first chunk of this file
@@ -796,10 +831,11 @@ class KBaseStore:
             return {"columns": [], "rows": [], "error": err_msg}
 
     def list_tables(self) -> list[dict]:
-        """List all tabular data tables."""
+        """List all tabular data tables (excludes disabled directories)."""
         c = self.conn.cursor()
         c.execute("SELECT * FROM tabular_registry ORDER BY file_path")
-        return [dict(row) for row in c.fetchall()]
+        tables = [dict(row) for row in c.fetchall()]
+        return [t for t in tables if not self._is_path_disabled(t.get("file_path", ""))]
 
     def get_table_schema(self, table_name: str) -> dict:
         """Get schema of a tabular data table."""
@@ -820,21 +856,27 @@ class KBaseStore:
     # ---- Stats ----
 
     def get_stats(self) -> dict:
-        """Get knowledge base statistics."""
+        """Get knowledge base statistics (excludes disabled directories)."""
         c = self.conn.cursor()
-        c.execute("SELECT COUNT(*) as cnt FROM files")
+        disabled_sql, disabled_params = self._sql_disabled_filter("source_dir")
+        where_active = disabled_sql.replace(" AND ", " WHERE ", 1) if disabled_sql else ""
+        and_active = disabled_sql
+
+        c.execute(f"SELECT COUNT(*) as cnt FROM files{where_active}", disabled_params)
         file_count = c.fetchone()["cnt"]
 
-        c.execute("SELECT file_type, COUNT(*) as cnt FROM files GROUP BY file_type ORDER BY cnt DESC")
+        c.execute(f"SELECT file_type, COUNT(*) as cnt FROM files{where_active} GROUP BY file_type ORDER BY cnt DESC", disabled_params)
         type_counts = {row["file_type"]: row["cnt"] for row in c.fetchall()}
 
         c.execute("SELECT COUNT(*) as cnt FROM tabular_registry")
         table_count = c.fetchone()["cnt"]
 
-        c.execute("SELECT COUNT(*) as cnt FROM files WHERE error != '' AND error IS NOT NULL")
+        c.execute(f"SELECT COUNT(*) as cnt FROM files WHERE error != '' AND error IS NOT NULL{and_active}", disabled_params)
         error_count = c.fetchone()["cnt"]
 
-        chunk_count = self.collection.count()
+        c.execute(f"SELECT SUM(chunk_count) as cnt FROM files{where_active}", disabled_params)
+        row = c.fetchone()
+        chunk_count = row["cnt"] or 0
 
         return {
             "workspace": self.workspace,
@@ -847,13 +889,15 @@ class KBaseStore:
         }
 
     def list_files(self, source_dir: str = None) -> list[dict]:
-        """List indexed files."""
+        """List indexed files (excludes disabled directories)."""
         c = self.conn.cursor()
+        disabled_sql, disabled_params = self._sql_disabled_filter("source_dir")
         if source_dir:
-            c.execute("SELECT * FROM files WHERE source_dir LIKE ? ORDER BY file_path",
-                       (f"%{source_dir}%",))
+            c.execute(f"SELECT * FROM files WHERE source_dir LIKE ?{disabled_sql} ORDER BY file_path",
+                       [f"%{source_dir}%"] + disabled_params)
         else:
-            c.execute("SELECT * FROM files ORDER BY file_path")
+            where = disabled_sql.replace(" AND ", " WHERE ", 1) if disabled_sql else ""
+            c.execute(f"SELECT * FROM files{where} ORDER BY file_path", disabled_params)
         return [dict(row) for row in c.fetchall()]
 
     def close(self):

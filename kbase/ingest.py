@@ -100,6 +100,7 @@ def ingest_directory(
 
         # Check pause signal — block until resumed
         while _ingest_pause.is_set() and not _ingest_stop.is_set():
+            _ingest_progress["status"] = "paused"
             if progress_callback:
                 progress_callback(i + 1, len(files), file_path.name, "paused")
             time.sleep(0.5)

@@ -220,6 +220,14 @@ def get_graph_data(store, edge_types=None, min_score=0.0, file_type=None, source
         params.append(source_dir)
     c.execute(query, params)
     files = [dict(row) for row in c.fetchall()]
+
+    # Filter out disabled directories
+    disabled = store.get_disabled_dirs()
+    if disabled:
+        files = [f for f in files if not any(
+            (f.get("file_path", "")).startswith(d + "/") for d in disabled
+        )]
+
     file_set = {f["file_id"] for f in files}
 
     # Get edges
