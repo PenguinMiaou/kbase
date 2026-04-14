@@ -39,13 +39,16 @@ call "%SCRIPT_DIR%.venv\Scripts\activate.bat"
 
 REM Install dependencies
 echo [3/5] Installing dependencies (this may take a few minutes)...
-pip install --upgrade pip -q 2>nul
-echo   Installing core packages...
+pip install --upgrade pip 2>nul
+echo.
+echo   Installing core packages (chromadb, fastapi, sentence-transformers...)
 cd /d "%SCRIPT_DIR%"
-pip install -e . -q
+pip install -e .
+echo.
 echo   Installing search enhancements...
-pip install jieba -q
-echo   Dependencies installed
+pip install jieba
+echo.
+echo   Dependencies installed!
 
 REM Create CLI wrapper
 echo [4/5] Creating CLI shortcut...
