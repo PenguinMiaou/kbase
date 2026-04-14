@@ -147,6 +147,13 @@ LLM_PROVIDERS = {
         "logo": "/static/logos/llm.png",
         "signup_url": "",
     },
+    "dify": {
+        "name": "Dify", "type": "dify",
+        "model": "dify", "base_url": "", "key_env": "CUSTOM_API_KEY",
+        "desc": "Dify AI Platform", "group": "local",
+        "logo": "/static/logos/llm.png",
+        "signup_url": "",
+    },
 }
 
 # Buddy personality presets
@@ -841,6 +848,8 @@ def _call_llm(provider: dict, messages: list, system: str, settings: dict) -> st
         return _call_ollama(provider, messages, system, settings)
     elif ptype == "cli":
         return _call_cli(provider, messages, system, settings)
+    elif ptype == "dify":
+        return _call_dify(provider, messages, system, settings)
     return f"Unsupported: {ptype}"
 
 
@@ -968,6 +977,45 @@ def _call_cli(provider, messages, system, settings):
         raise ValueError(f"CLI timed out after 120s")
     except FileNotFoundError:
         raise ValueError(f"'{executable}' not found")
+
+
+def _call_dify(provider, messages, system, settings):
+    """Call Dify API (/v1/chat-messages format)."""
+    import urllib.request
+    api_key = settings.get("custom_api_key") or settings.get("dify_api_key", "")
+    if not api_key:
+        raise ValueError("Dify API key not set. Configure in Settings.")
+    base_url = (settings.get("custom_base_url") or provider.get("base_url", "")).rstrip("/")
+    if not base_url:
+        raise ValueError("Dify Base URL not set. Configure in Settings.")
+
+    # Dify expects: {query, user, inputs, response_mode}
+    # Combine system prompt + messages into query
+    user_msg = messages[-1]["content"] if messages else ""
+    query = f"{system}\n\n{user_msg}" if system else user_msg
+
+    payload = json.dumps({
+        "inputs": {},
+        "query": query,
+        "response_mode": "blocking",
+        "user": "kbase-user",
+    }).encode()
+
+    url = f"{base_url}/chat-messages"
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = json.loads(resp.read())
+            return data.get("answer", "") or data.get("message", "No response")
+    except Exception as e:
+        raise ValueError(f"Dify API error: {e}")
 
 
 # ---- Knowledge Compilation (Karpathy LLM Wiki-inspired) ----
