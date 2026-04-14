@@ -1,9 +1,4 @@
 @echo off
-REM Keep window open on errors (prevent flash-close)
-if "%~1"=="" (
-    cmd /k "%~f0" run
-    exit /b
-)
 REM ============================================================
 REM KBase - One-Click Install Script (Windows)
 REM ============================================================
