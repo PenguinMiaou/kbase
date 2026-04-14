@@ -224,6 +224,10 @@ function switchTab(name){
   const titleBar=document.getElementById('session-title-bar');
   if(titleBar)titleBar.style.display=name==='chat'?'':'none';
 
+  // Hide graph tooltip when leaving graph tab
+  const graphTip=document.getElementById('graph-tooltip');
+  if(graphTip)graphTip.style.display='none';
+
   // Close artifact panel when leaving graph/search
   if(name!=='graph'&&name!=='chat'&&name!=='search'){
     closeArtifact();
@@ -256,6 +260,157 @@ function handleKey(e){
 }
 function autoResize(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,120)+'px';}
 
+// === Document Skill ===
+function detectDocumentSkill(q){
+  // Detect if user wants to modify/enrich a document
+  const keywords=['修改','补充','修订','完善','填充','更新','生成文件','输出文件','导出','改文档',
+    'enrich','modify','supplement','revise','fill in','update file','generate file','output file'];
+  const fileKeywords=['excel','xlsx','xls','pptx','docx','表格','文档','PPT','幻灯片','Word'];
+  const hasAction=keywords.some(k=>q.toLowerCase().includes(k));
+  const hasFile=fileKeywords.some(k=>q.toLowerCase().includes(k.toLowerCase()));
+  return hasAction && hasFile;
+}
+
+async function runDocumentSkill(q, el){
+  const isZh=curLang==='zh';
+  const loadId='skill-'+Date.now();
+
+  // Find referenced file from recent sources or indexed files
+  let filePath=null;
+  // Check if user mentioned a specific file name
+  const fileMatch=q.match(/(?:文件|file|叫|名为|called)\s*[：:]*\s*([^\s,，。.]+\.(xlsx|xls|pptx|docx))/i);
+  if(fileMatch){
+    // Search for this file in the index
+    try{
+      const resp=await fetch('/api/search?q='+encodeURIComponent(fileMatch[1])+'&top_k=1');
+      const data=await resp.json();
+      if(data.results&&data.results.length>0) filePath=data.results[0].metadata?.file_path;
+    }catch(e){}
+  }
+
+  if(!filePath){
+    // Try to find from recent chat sources
+    const allSources=document.querySelectorAll('.source-chip[data-path]');
+    for(const s of allSources){
+      const p=s.dataset.path||'';
+      if(p.match(/\.(xlsx|xls|pptx|docx)$/i)){filePath=p;break;}
+    }
+  }
+
+  if(!filePath){
+    el.innerHTML+=`<div class="msg-ai"><span style="color:var(--text-dim);">${isZh?'请指定要修改的文件名（如：修改 xxx.xlsx）':'Please specify a file to modify (e.g., modify xxx.xlsx)'}</span></div>`;
+    return;
+  }
+
+  // Show skill execution panel
+  el.innerHTML+=`<div class="msg-ai" id="${loadId}">
+    <div style="border:1px solid var(--border);border-radius:12px;padding:16px;background:var(--bg-secondary);">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
+        <span style="font-weight:600;">${isZh?'文档修改 Skill':'Document Skill'}</span>
+      </div>
+      <div id="skill-progress-${loadId}">
+        <div style="display:flex;align-items:center;gap:6px;color:var(--text-dim);font-size:13px;">
+          <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
+          <span id="skill-status-${loadId}">${isZh?'正在解析文件...':'Parsing file...'}</span>
+        </div>
+        <div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden;margin-top:8px;">
+          <div id="skill-bar-${loadId}" style="height:100%;width:5%;background:linear-gradient(90deg,#22c55e,#16a34a);border-radius:2px;transition:width 0.5s ease;"></div>
+        </div>
+        <div id="skill-log-${loadId}" style="font-size:11px;color:var(--text-muted);margin-top:8px;max-height:120px;overflow-y:auto;font-family:var(--mono);"></div>
+      </div>
+      <div id="skill-result-${loadId}" style="display:none;"></div>
+    </div>
+  </div>`;
+  el.parentElement.scrollTop=el.parentElement.scrollHeight;
+
+  // Call skill API
+  try{
+    const evtSrc=new EventSource('/api/skill/run?'+new URLSearchParams({
+      // SSE doesn't support POST body, use query params for simple case
+    }));
+    // Use fetch with POST instead
+    const resp=await fetch('/api/skill/run',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        instruction:q,
+        file_path:filePath,
+        use_knowledge_base:true,
+        use_web_search:true,
+      })
+    });
+
+    const reader=resp.body.getReader();
+    const decoder=new TextDecoder();
+    let buffer='';
+
+    while(true){
+      const {done,value}=await reader.read();
+      if(done)break;
+      buffer+=decoder.decode(value,{stream:true});
+      const lines=buffer.split('\n');
+      buffer=lines.pop()||'';
+
+      for(const line of lines){
+        if(!line.startsWith('data: '))continue;
+        try{
+          const d=JSON.parse(line.slice(6));
+          const statusEl=document.getElementById('skill-status-'+loadId);
+          const barEl=document.getElementById('skill-bar-'+loadId);
+          const logEl=document.getElementById('skill-log-'+loadId);
+
+          if(d.type==='status'||d.type==='search'||d.type==='enrich'||d.type==='plan'){
+            if(statusEl)statusEl.textContent=d.message||'';
+            if(d.type==='search')barEl.style.width='40%';
+            if(d.type==='enrich'){
+              const pct=d.total_rows?Math.round(40+50*(d.current_row/d.total_rows)):60;
+              barEl.style.width=pct+'%';
+            }
+            if(d.type==='plan')barEl.style.width='20%';
+            if(logEl&&d.message){
+              const div=document.createElement('div');
+              div.textContent=d.message;
+              logEl.appendChild(div);
+              logEl.scrollTop=logEl.scrollHeight;
+            }
+          }
+          if(d.type==='complete'||d.type==='done'){
+            barEl.style.width='100%';
+            barEl.style.background='linear-gradient(90deg,#22c55e,#16a34a)';
+            const resultEl=document.getElementById('skill-result-'+loadId);
+            const progressEl=document.getElementById('skill-progress-'+loadId);
+            if(progressEl)progressEl.style.display='none';
+            if(resultEl){
+              resultEl.style.display='block';
+              const fname=d.output_name||d.output_path?.split('/').pop()||'output';
+              const url=d.download_url||`/api/skill/download/${fname}`;
+              resultEl.innerHTML=`
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>
+                  <span style="font-weight:600;color:#22c55e;">${isZh?'完成':'Done'}</span>
+                </div>
+                <div style="font-size:13px;margin-bottom:8px;">${esc(d.summary||`${d.changes_count||0} ${isZh?'处修改':'changes'}`)}</div>
+                <a href="${url}" download style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;background:var(--accent);color:#fff;border-radius:8px;text-decoration:none;font-size:13px;">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+                  ${isZh?'下载':'Download'} ${esc(fname)}
+                </a>
+                ${d.elapsed_seconds?`<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">${d.elapsed_seconds}s</div>`:''}`;
+            }
+          }
+          if(d.type==='error'){
+            barEl.style.width='100%';
+            barEl.style.background='#ef4444';
+            if(statusEl)statusEl.innerHTML=`<span style="color:#ef4444;">Error: ${esc(d.message||'')}</span>`;
+          }
+        }catch(e){}
+      }
+    }
+  }catch(e){
+    document.getElementById('skill-status-'+loadId).innerHTML=`<span style="color:#ef4444;">Error: ${esc(e.message)}</span>`;
+  }
+}
+
 // === Chat ===
 async function doChat(){
   const input=document.getElementById('chat-input');
@@ -266,6 +421,14 @@ async function doChat(){
   const el=document.getElementById('chat-messages');
   const welcome=document.getElementById('chat-welcome');
   if(welcome)welcome.style.display='none';
+
+  // Check if this is a document skill request
+  if(detectDocumentSkill(q)){
+    el.innerHTML+=`<div class="msg-user">${esc(q)}</div>`;
+    el.parentElement.scrollTop=el.parentElement.scrollHeight;
+    await runDocumentSkill(q, el);
+    return;
+  }
 
   // User message
   el.innerHTML+=`<div class="msg-user">${esc(q)}</div>`;
