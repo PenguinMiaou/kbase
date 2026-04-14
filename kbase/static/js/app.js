@@ -817,9 +817,30 @@ function showSourcePreview(e,el){
   _previewEl.style.display='block';
 }
 
+let _previewTimer=null;
 function hideSourcePreview(){
-  if(_previewEl)_previewEl.style.display='none';
+  // Delay hide slightly so mouse can move to popup
+  _previewTimer=setTimeout(()=>{
+    if(_previewEl)_previewEl.style.display='none';
+  },200);
 }
+// Keep popup visible while hovering over it
+document.addEventListener('mouseover',e=>{
+  if(_previewEl&&_previewEl.contains(e.target)){
+    clearTimeout(_previewTimer);
+  }
+});
+document.addEventListener('mouseout',e=>{
+  if(_previewEl&&_previewEl.contains(e.target)&&!_previewEl.contains(e.relatedTarget)){
+    _previewTimer=setTimeout(()=>{if(_previewEl)_previewEl.style.display='none';},200);
+  }
+});
+// Also hide on any click outside
+document.addEventListener('click',e=>{
+  if(_previewEl&&_previewEl.style.display==='block'&&!_previewEl.contains(e.target)){
+    _previewEl.style.display='none';
+  }
+});
 
 async function openFile(path){
   hideSourcePreview();

@@ -168,6 +168,10 @@ def hybrid_search(store: KBaseStore, query: str, top_k: int = 10,
                 ],
             }
 
+    # Final sort — ensure results are ordered by best available score
+    _score_key = "rerank_score" if any("rerank_score" in r for r in fused) else "rrf_score"
+    fused.sort(key=lambda x: x.get(_score_key, x.get("score", 0)), reverse=True)
+
     return {
         "query": query,
         "expanded_query": expanded if expanded != query else None,

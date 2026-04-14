@@ -1101,12 +1101,12 @@ del "%~f0" >nul 2>&1
         info["can_convert"] = True  # always true — Python libs as fallback
 
         # Get original text from ChromaDB (not jieba-segmented FTS)
+        chunks = []
         try:
             results = store.collection.get(
                 where={"file_id": file_id},
                 include=["documents", "metadatas"],
             )
-            # Sort by chunk_index, filter out parent chunks
             chunk_pairs = []
             for i, meta in enumerate(results.get("metadatas", [])):
                 is_parent = meta.get("is_parent")
@@ -1117,7 +1117,20 @@ del "%~f0" >nul 2>&1
             chunk_pairs.sort(key=lambda x: x[0])
             chunks = [{"text": cp[1], "metadata": cp[2]} for cp in chunk_pairs[:max_chunks]]
         except Exception:
-            chunks = []
+            pass
+
+        # Fallback: if ChromaDB has no chunks, try reading file directly
+        if not chunks and info.get("file_path"):
+            try:
+                from kbase.extract import extract_file
+                fp = info["file_path"]
+                if Path(fp).exists():
+                    result = extract_file(fp)
+                    text = result.get("text", "")
+                    if text:
+                        chunks = [{"text": text[:5000], "metadata": {"source": "direct_read"}}]
+            except Exception:
+                pass
         # Also get edges for this file
         c.execute("""
             SELECT e.edge_id, e.edge_type, e.label, e.direction, e.score, e.method,
