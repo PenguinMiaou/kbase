@@ -1,114 +1,65 @@
 @echo off
 REM ============================================================
 REM KBase - One-Click Install Script (Windows)
+REM Uses uv for fast, reliable Python + dependency management
 REM ============================================================
 
 echo.
 echo   ========================================
-echo            KBase Installer
+echo          KBase Installer v0.7
 echo      Local Knowledge Base System
 echo   ========================================
 echo.
 
-REM Check Python
-echo [1/5] Checking Python...
-python --version >nul 2>&1
+REM Step 1: Install uv
+echo [1/3] Setting up uv package manager...
+where uv >nul 2>&1
 if errorlevel 1 (
-    echo.
-    echo   ==========================================
-    echo   Python is not installed on this computer.
-    echo   ==========================================
-    echo.
-    echo   Please install Python first:
-    echo.
-    echo   1. Open this link in your browser:
-    echo      https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe
-    echo.
-    echo   2. Run the installer
-    echo      IMPORTANT: Check "Add Python to PATH" at the bottom!
-    echo.
-    echo   3. After install, CLOSE this window, reopen terminal,
-    echo      and run install.bat again.
-    echo.
-    echo   ==========================================
-    pause
-    exit /b 1
+    echo   Installing uv...
+    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+    set "PATH=%USERPROFILE%\.local\bin;%PATH%"
+) else (
+    echo   uv found
 )
-echo   Python found:
-python --version
 
-REM Get script directory
+REM Step 2: Install KBase
+echo [2/3] Installing KBase + Python 3.12...
 set SCRIPT_DIR=%~dp0
-
-REM Create virtual environment
-echo [2/5] Creating virtual environment...
-if not exist "%SCRIPT_DIR%.venv" (
-    python -m venv "%SCRIPT_DIR%.venv"
-    echo   Created .venv
+if exist "%SCRIPT_DIR%pyproject.toml" (
+    echo   Installing from local source...
+    uv tool install --from "%SCRIPT_DIR%" kbase-app --python 3.12 --force
 ) else (
-    echo   Using existing .venv
+    echo   Installing from PyPI...
+    uv tool install kbase-app --python 3.12 --force
+)
+echo   KBase installed!
+
+REM Step 3: Install pywebview for desktop mode
+echo [3/3] Setting up desktop mode...
+set UV_TOOL_DIR=%USERPROFILE%\.local\share\uv\tools\kbase-app
+if exist "%UV_TOOL_DIR%" (
+    uv pip install --python "%UV_TOOL_DIR%\Scripts\python.exe" pywebview
+    echo   Desktop mode ready
 )
 
-REM Activate venv
-call "%SCRIPT_DIR%.venv\Scripts\activate.bat"
-
-REM Install dependencies
-echo [3/5] Installing dependencies (this may take a few minutes)...
-pip install --upgrade pip 2>nul
-echo.
-echo   Installing core packages (chromadb, fastapi, sentence-transformers...)
-cd /d "%SCRIPT_DIR%"
-pip install -e .
-echo.
-echo   Installing search enhancements...
-pip install jieba
-echo.
-echo   Dependencies installed!
-
-REM Create CLI wrapper
-echo [4/5] Creating CLI shortcut...
-(
-echo @echo off
-echo call "%SCRIPT_DIR%.venv\Scripts\activate.bat"
-echo python -m kbase.cli %%*
-) > "%SCRIPT_DIR%kbase.bat"
-echo   Created: %SCRIPT_DIR%kbase.bat
-
-REM Check LibreOffice
-echo [5/6] Checking LibreOffice (for file preview)...
-where soffice >nul 2>&1
-if errorlevel 1 (
-    echo   LibreOffice not found - needed for PPTX/DOCX preview
-    where winget >nul 2>&1
-    if not errorlevel 1 (
-        echo   Installing via winget...
-        winget install --id TheDocumentFoundation.LibreOffice -e --silent
-    ) else (
-        echo   Install manually from: https://www.libreoffice.org/download
-    )
-) else (
-    echo   LibreOffice found
-)
-
-REM Quick test
-echo [6/6] Running quick test...
-python -c "from kbase.store import KBaseStore; print('  All modules OK')"
+REM Create desktop shortcut
+echo @echo off > "%USERPROFILE%\Desktop\KBase.bat"
+echo set "PATH=%%USERPROFILE%%\.local\bin;%%PATH%%" >> "%USERPROFILE%\Desktop\KBase.bat"
+echo kbase-desktop 2^>nul ^|^| kbase web >> "%USERPROFILE%\Desktop\KBase.bat"
+echo   Desktop shortcut created!
 
 echo.
 echo ============================================
 echo   Installation complete!
 echo ============================================
 echo.
-echo   Quick Start:
+echo   Commands:
 echo.
-echo   1. Launch Web UI:
-echo      .\kbase.bat web
-echo      Then open http://localhost:8765
+echo   kbase web                   Start Web UI (browser)
+echo   kbase-desktop               Start Desktop App (native window)
+echo   kbase ingest C:\path\files  Index files
+echo   kbase search "query"        Search
 echo.
-echo   2. Index your files:
-echo      .\kbase.bat ingest C:\path\to\your\files
-echo.
-echo   3. Search:
-echo      .\kbase.bat search "your question"
+echo   Data stored in: %%USERPROFILE%%\.kbase\
 echo.
 pause

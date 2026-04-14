@@ -4,9 +4,11 @@ import json
 import os
 import re
 import sqlite3
+import sys
 import time
 from pathlib import Path
 from typing import Optional
+
 
 import chromadb
 from chromadb.utils import embedding_functions
@@ -75,46 +77,32 @@ def _safe_sentence_transformer(model_name: str):
     except Exception as e:
         import sys
         if getattr(sys, 'frozen', False):
-            # In DMG mode: use ChromaDB default now
+            # In DMG mode: use ChromaDB default now, install proper model in background
             print(f"[KBase] SentenceTransformer failed ({e}), using ChromaDB default embedding")
+            _background_install_st(model_name)
             return embedding_functions.DefaultEmbeddingFunction()
         raise
 
 
-_st_install_started = False
+_bg_install_started = False
+
 
 def _background_install_st(model_name: str):
-    """Background install sentence_transformers + download model. Next restart will use it."""
-    global _st_install_started
-    if _st_install_started:
+    """Background download embedding model (on first launch)."""
+    global _bg_install_started
+    if _bg_install_started:
         return
-    _st_install_started = True
+    _bg_install_started = True
 
-    import threading, subprocess, sys
+    import threading
     def do_install():
         try:
-            # Use the bundled Python to pip install into user site-packages
-            pip_target = str(Path.home() / ".kbase" / "python_packages")
-            Path(pip_target).mkdir(parents=True, exist_ok=True)
-
-            print(f"[KBase] Installing sentence_transformers to {pip_target} ...")
-            subprocess.run(
-                [sys.executable, "-m", "pip", "install",
-                 "--target", pip_target,
-                 "sentence_transformers", "--quiet"],
-                timeout=600, capture_output=True,
-            )
-            # Add to sys.path so next KBaseStore() init can find it
-            if pip_target not in sys.path:
-                sys.path.insert(0, pip_target)
-
-            # Pre-download the model
             print(f"[KBase] Downloading model {model_name} ...")
             from sentence_transformers import SentenceTransformer
             SentenceTransformer(model_name)
-            print(f"[KBase] Model {model_name} ready! Restart KBase for optimal Chinese search.")
+            print(f"[KBase] Model ready! Restart KBase to use it.")
         except Exception as e:
-            print(f"[KBase] Background install failed: {e}")
+            print(f"[KBase] Model download failed: {e}")
 
     threading.Thread(target=do_install, daemon=True).start()
 
@@ -143,9 +131,14 @@ class KBaseStore:
         # ChromaDB for vector search
         chroma_path = get_chroma_path(workspace)
         chroma_path.mkdir(parents=True, exist_ok=True)
-        self.chroma_client = chromadb.PersistentClient(path=str(chroma_path))
 
         self.ef = _create_embedding_function(self.embedding_model)
+
+        # Pre-flight: check dimension mismatch BEFORE opening ChromaDB client
+        # This must happen first because ChromaDB's Rust backend locks the file
+        self._preflight_dimension_check(chroma_path)
+
+        self.chroma_client = chromadb.PersistentClient(path=str(chroma_path))
         try:
             self.collection = self.chroma_client.get_or_create_collection(
                 name="documents",
@@ -155,7 +148,7 @@ class KBaseStore:
         except (ValueError, Exception) as e:
             # Embedding function conflict — delete and recreate collection
             if "conflict" in str(e).lower() or "embedding" in str(e).lower():
-                print(f"[KBase] ChromaDB embedding conflict, rebuilding collection: {e}")
+                print(f"[KBase] ChromaDB embedding conflict, rebuilding: {e}")
                 try:
                     self.chroma_client.delete_collection("documents")
                 except Exception:
@@ -168,67 +161,98 @@ class KBaseStore:
             else:
                 raise
 
-        # Dimension mismatch detection: if user switched embedding model,
-        # the existing ChromaDB collection has wrong dimensions.
-        # Auto-delete and recreate to prevent cryptic errors.
-        self._check_embedding_dimension(chroma_path)
+    def _preflight_dimension_check(self, chroma_path):
+        """Pre-flight check: detect dimension mismatch BEFORE creating ChromaDB client.
 
-    def _check_embedding_dimension(self, chroma_path):
-        """Detect embedding dimension mismatch when user switches model.
-
-        If the existing ChromaDB collection was built with a different dimension,
-        delete it and recreate so re-ingest works cleanly.
+        Reads the chroma.sqlite3 schema directly (no Rust client needed).
+        If mismatch found, wipes the entire chroma directory so a fresh
+        client + collection can be created with the correct dimension.
         """
+        import shutil
+        chroma_db = Path(chroma_path) / "chroma.sqlite3"
+        if not chroma_db.exists():
+            return
+
         try:
-            count = self.collection.count()
-            if count == 0:
-                return  # Empty collection, nothing to check
+            _conn = sqlite3.connect(str(chroma_db))
+            row = _conn.execute("SELECT dimension FROM collections WHERE name = 'documents'").fetchone()
+            _conn.close()
 
-            # Sample one embedding to get stored dimension
-            sample = self.collection.peek(limit=1)
-            if not sample:
+            if not row or not row[0]:
                 return
-            embs = sample.get("embeddings")
-            if embs is None or (hasattr(embs, '__len__') and len(embs) == 0):
-                return
+            stored_dim = row[0]
 
-            stored_dim = len(embs[0])
-
-            # Get expected dimension from current model
+            # Get expected dimension
             model_info = EMBEDDING_MODELS.get(self.embedding_model, {})
             expected_dim = model_info.get("dim", 0)
-
-            # If model doesn't declare dim, probe it
             if expected_dim == 0:
                 try:
                     test_emb = self.ef(["test"])
                     if test_emb and len(test_emb) > 0:
                         expected_dim = len(test_emb[0])
                 except Exception:
-                    return  # Can't determine, skip check
+                    return
 
             if expected_dim > 0 and stored_dim != expected_dim:
-                print(f"[KBase] Embedding dimension mismatch: collection has {stored_dim}d, "
-                      f"model '{self.embedding_model}' expects {expected_dim}d. "
-                      f"Rebuilding ChromaDB collection...")
-
-                # Delete and recreate collection
-                self.chroma_client.delete_collection("documents")
-                self.collection = self.chroma_client.get_or_create_collection(
-                    name="documents",
-                    embedding_function=self.ef,
-                    metadata={"hnsw:space": "cosine"},
-                )
-
-                # Reset chunk counts in SQLite (data needs re-ingest)
+                print(f"[KBase] Embedding dimension mismatch: {stored_dim}d → {expected_dim}d "
+                      f"(model: {self.embedding_model}). Wiping ChromaDB...")
+                # Wipe entire chroma directory BEFORE any client opens it
+                for item in Path(chroma_path).iterdir():
+                    if item.name == "__pycache__":
+                        continue
+                    if item.is_dir():
+                        shutil.rmtree(item, ignore_errors=True)
+                    else:
+                        item.unlink(missing_ok=True)
+                # Reset chunk counts
                 c = self.conn.cursor()
                 c.execute("UPDATE files SET chunk_count = 0")
-                c.execute("DELETE FROM fts_chunks")
                 self.conn.commit()
-
-                print(f"[KBase] ChromaDB rebuilt. Please re-ingest your files.")
+                print(f"[KBase] ChromaDB wiped. Will rebuild with {expected_dim}d embeddings.")
         except Exception as e:
-            print(f"[KBase] Dimension check skipped: {e}")
+            print(f"[KBase] Dimension pre-flight check skipped: {e}")
+
+    def rebuild_chromadb(self, new_model: str = None):
+        """Clear ChromaDB and recreate collection for new embedding model.
+
+        Preserves FTS5 keyword data — only vector embeddings are cleared.
+        Files remain indexed; re-sync directories to rebuild embeddings.
+        """
+        if new_model:
+            self.embedding_model = new_model
+            self.ef = _create_embedding_function(new_model)
+
+        # Must fully reset ChromaDB: delete collection + wipe persistent storage
+        # to clear dimension constraints baked into collection schema
+        try:
+            self.chroma_client.delete_collection("documents")
+        except Exception:
+            pass
+
+        # Remove stale HNSW segment directories that retain old dimension config
+        import shutil
+        chroma_path = get_chroma_path(self.workspace)
+        for item in chroma_path.iterdir():
+            if item.is_dir() and item.name != "__pycache__":
+                shutil.rmtree(item, ignore_errors=True)
+        # Also clear the chroma sqlite to remove stale segment references
+        chroma_sqlite = chroma_path / "chroma.sqlite3"
+        if chroma_sqlite.exists():
+            chroma_sqlite.unlink()
+
+        # Recreate client and collection from scratch
+        self.chroma_client = chromadb.PersistentClient(path=str(chroma_path))
+        self.collection = self.chroma_client.get_or_create_collection(
+            name="documents",
+            embedding_function=self.ef,
+            metadata={"hnsw:space": "cosine"},
+        )
+
+        # Reset chunk counts so re-ingest knows to rebuild
+        c = self.conn.cursor()
+        c.execute("UPDATE files SET chunk_count = 0")
+        self.conn.commit()
+        print(f"[KBase] ChromaDB fully rebuilt for {self.embedding_model}. Re-sync to rebuild embeddings.")
 
     def _init_sqlite(self):
         c = self.conn.cursor()

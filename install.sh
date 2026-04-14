@@ -1,133 +1,108 @@
 #!/bin/bash
 # ============================================================
 # KBase - One-Click Install Script (macOS / Linux)
+# Uses uv for fast, reliable Python + dependency management
 # ============================================================
 set -e
 
 echo ""
 echo "  ╔═══════════════════════════════════════╗"
-echo "  ║          KBase Installer              ║"
+echo "  ║          KBase Installer v0.7         ║"
 echo "  ║   Local Knowledge Base System         ║"
 echo "  ╚═══════════════════════════════════════╝"
 echo ""
 
-# Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-# Check Python
-echo -e "${YELLOW}[1/5] Checking Python...${NC}"
-if command -v python3 &> /dev/null; then
-    PY_VER=$(python3 --version 2>&1)
-    echo -e "  ${GREEN}Found: $PY_VER${NC}"
+UV_BIN="$HOME/.local/bin/uv"
+
+# Step 1: Install uv (fast Python package manager)
+echo -e "${YELLOW}[1/4] Setting up uv package manager...${NC}"
+if command -v uv &> /dev/null; then
+    echo -e "  ${GREEN}Found: $(uv --version)${NC}"
+elif [ -f "$UV_BIN" ]; then
+    echo -e "  ${GREEN}Found: $($UV_BIN --version)${NC}"
+    export PATH="$HOME/.local/bin:$PATH"
 else
-    echo -e "  ${RED}Python 3 not found!${NC}"
-    echo "  Please install Python 3.9+ first:"
-    echo "    macOS: brew install python@3.10"
-    echo "    Linux: sudo apt install python3 python3-pip"
-    exit 1
+    echo "  Installing uv..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+    echo -e "  ${GREEN}Installed: $(uv --version)${NC}"
 fi
 
-# Check Python version >= 3.9
-PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
-if [ "$PY_MINOR" -lt 9 ]; then
-    echo -e "  ${RED}Python 3.9+ required (found 3.$PY_MINOR)${NC}"
-    exit 1
-fi
+# Step 2: Install KBase
+echo -e "${YELLOW}[2/4] Installing KBase + Python 3.12...${NC}"
 
-# Get script directory
+# Check if installing from local source or PyPI
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-# Create virtual environment
-echo -e "${YELLOW}[2/5] Creating virtual environment...${NC}"
-if [ ! -d "$SCRIPT_DIR/.venv" ]; then
-    python3 -m venv "$SCRIPT_DIR/.venv"
-    echo -e "  ${GREEN}Created .venv${NC}"
+if [ -f "$SCRIPT_DIR/pyproject.toml" ] && grep -q "kbase-app" "$SCRIPT_DIR/pyproject.toml" 2>/dev/null; then
+    # Local source install
+    echo "  Installing from local source..."
+    uv tool install --from "$SCRIPT_DIR" kbase-app --python 3.12 --force 2>&1 | tail -5
 else
-    echo -e "  ${GREEN}Using existing .venv${NC}"
+    # PyPI install
+    echo "  Installing from PyPI..."
+    uv tool install kbase-app --python 3.12 --force 2>&1 | tail -5
+fi
+echo -e "  ${GREEN}KBase installed${NC}"
+
+# Step 3: Desktop integration (optional pywebview)
+echo -e "${YELLOW}[3/4] Setting up desktop mode...${NC}"
+# Install pywebview for native window
+UV_TOOL_DIR="$HOME/.local/share/uv/tools/kbase-app"
+if [ -d "$UV_TOOL_DIR" ]; then
+    uv pip install --python "$UV_TOOL_DIR/bin/python3" pywebview 2>&1 | tail -3
+    echo -e "  ${GREEN}Desktop mode ready (native window)${NC}"
+else
+    echo -e "  ${YELLOW}Skipped — will use browser mode${NC}"
 fi
 
-# Activate venv
-source "$SCRIPT_DIR/.venv/bin/activate"
-
-# Install dependencies
-echo -e "${YELLOW}[3/5] Installing dependencies (this may take a few minutes)...${NC}"
-pip install --upgrade pip -q 2>/dev/null
-echo "  Installing core packages..."
-pip install -e "$SCRIPT_DIR" -q 2>&1 | tail -3
-echo "  Installing search enhancements (jieba + reranker)..."
-pip install jieba FlagEmbedding -q 2>&1 | tail -3
-echo -e "  ${GREEN}Dependencies installed${NC}"
-
-# Install LibreOffice for file preview (PPTX/DOCX/XLSX -> PDF)
-echo -e "${YELLOW}[4/6] Checking LibreOffice (for file preview)...${NC}"
+# Step 4: LibreOffice check
+echo -e "${YELLOW}[4/4] Checking LibreOffice...${NC}"
 if command -v soffice &> /dev/null; then
     echo -e "  ${GREEN}LibreOffice found${NC}"
 else
-    echo "  LibreOffice not found — needed for PPTX/DOCX preview"
-    if [[ "$(uname)" == "Darwin" ]]; then
-        if command -v brew &> /dev/null; then
-            echo "  Installing via Homebrew (this may take a few minutes)..."
-            brew install --cask libreoffice 2>&1 | tail -3
-            echo -e "  ${GREEN}LibreOffice installed${NC}"
-        else
-            echo -e "  ${YELLOW}Install manually: brew install --cask libreoffice${NC}"
-            echo -e "  ${YELLOW}Or download from: https://www.libreoffice.org/download${NC}"
-        fi
-    elif command -v apt-get &> /dev/null; then
-        echo "  Installing via apt..."
-        sudo apt-get install -y libreoffice-core 2>&1 | tail -3
-        echo -e "  ${GREEN}LibreOffice installed${NC}"
-    else
-        echo -e "  ${YELLOW}Install manually from: https://www.libreoffice.org/download${NC}"
+    echo -e "  ${YELLOW}Not found — file preview will use fallback mode${NC}"
+    if [[ "$(uname)" == "Darwin" ]] && command -v brew &> /dev/null; then
+        echo "  Tip: brew install --cask libreoffice"
     fi
 fi
 
-# Create CLI wrapper
-echo -e "${YELLOW}[5/6] Creating CLI shortcut...${NC}"
-WRAPPER="$SCRIPT_DIR/kbase-cli"
-cat > "$WRAPPER" << 'WRAPPER_EOF'
+# Create desktop shortcut on macOS
+if [[ "$(uname)" == "Darwin" ]]; then
+    SHORTCUT="$HOME/Desktop/KBase.command"
+    cat > "$SHORTCUT" << 'EOF'
 #!/bin/bash
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/.venv/bin/activate"
-python3 -m kbase.cli "$@"
-WRAPPER_EOF
-chmod +x "$WRAPPER"
-echo -e "  ${GREEN}Created: $WRAPPER${NC}"
-
-# Quick test
-echo -e "${YELLOW}[6/6] Running quick test...${NC}"
-python3 -c "from kbase.store import KBaseStore; print('  All modules OK')" 2>/dev/null || echo -e "  ${RED}Module test failed${NC}"
+export PATH="$HOME/.local/bin:$PATH"
+echo "Starting KBase..."
+kbase-desktop 2>/dev/null || kbase web
+EOF
+    chmod +x "$SHORTCUT"
+    echo -e "  ${GREEN}Desktop shortcut created: KBase.command${NC}"
+fi
 
 echo ""
 echo -e "${GREEN}============================================${NC}"
 echo -e "${GREEN}  Installation complete!${NC}"
 echo -e "${GREEN}============================================${NC}"
 echo ""
-echo "  Quick Start:"
+echo "  Commands:"
 echo ""
-echo "  1. Index your files:"
-echo "     ./kbase-cli ingest /path/to/your/files"
+echo "  kbase web                  # Start Web UI (browser)"
+echo "  kbase-desktop              # Start Desktop App (native window)"
+echo "  kbase ingest /path/files   # Index files"
+echo "  kbase search \"query\"       # Search"
 echo ""
-echo "  2. Search:"
-echo "     ./kbase-cli search \"your question\""
-echo ""
-echo "  3. Launch Web UI:"
-echo "     ./kbase-cli web"
-echo "     Then open http://localhost:8765"
-echo ""
-echo "  4. Get JSON output (for LLM/scripts):"
-echo "     ./kbase-cli -f json search \"query\""
-echo ""
-echo "  For full docs: cat $SCRIPT_DIR/README.md"
+echo "  Data stored in: ~/.kbase/"
+echo "  Docs: https://github.com/PenguinMiaou/kbase"
 echo ""
 
-# Optional: add to PATH
-if [[ ":$PATH:" != *":$SCRIPT_DIR:"* ]]; then
-    echo -e "${YELLOW}  Tip: Add to PATH for global access:${NC}"
-    echo "    echo 'export PATH=\"$SCRIPT_DIR:\$PATH\"' >> ~/.zshrc"
-    echo "    source ~/.zshrc"
+# Add to PATH hint
+if ! command -v kbase &> /dev/null; then
+    echo -e "${YELLOW}  Add to PATH:${NC}"
+    echo "    echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc && source ~/.zshrc"
     echo ""
 fi

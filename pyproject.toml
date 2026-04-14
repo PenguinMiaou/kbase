@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kbase-app"
+version = "0.7.0"
+description = "Local knowledge base: RAG + Text2SQL + Full-text Search with Web UI"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{name = "PenguinMiaou"}]
+keywords = ["knowledge-base", "rag", "search", "chromadb", "local-first"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Text Processing :: Indexing",
+]
+
+dependencies = [
+    "chromadb>=0.5.0",
+    "sentence-transformers>=2.2.0",
+    "python-pptx>=0.6.21",
+    "python-docx>=1.0.0",
+    "openpyxl>=3.1.0",
+    "PyMuPDF>=1.23.0",
+    "click>=8.0.0",
+    "watchdog>=3.0.0",
+    "rich>=13.0.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "python-multipart>=0.0.6",
+    "setproctitle>=1.3.0",
+    "jieba>=0.42.1",
+    "xlrd>=2.0.0",
+    "lxml>=4.9.0",
+]
+
+[project.optional-dependencies]
+desktop = ["pywebview>=5.0"]
+whisper = ["openai-whisper>=20231117"]
+all = ["kbase-app[desktop,whisper]"]
+
+[project.scripts]
+kbase = "kbase.cli:main"
+kbase-desktop = "kbase.desktop:main"
+
+[project.urls]
+Homepage = "https://github.com/PenguinMiaou/kbase"
+Issues = "https://github.com/PenguinMiaou/kbase/issues"
+
+[tool.setuptools.packages.find]
+include = ["kbase*"]
+
+[tool.setuptools.package-data]
+kbase = ["static/**/*", "connectors/*.py"]

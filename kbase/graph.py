@@ -43,12 +43,15 @@ def compute_graph(store, threshold: float = 0.65, max_edges_per_node: int = 8):
     try:
         # Get all embeddings from ChromaDB in batches
         all_data = store.collection.get(include=["embeddings", "metadatas"])
-        if all_data["embeddings"] is None or len(all_data["embeddings"]) == 0:
-            return {"status": "skipped", "reason": "no embeddings found", "nodes": len(files), "edges": 0}
+        embs = all_data.get("embeddings")
+        has_embeddings = embs is not None and (hasattr(embs, '__len__') and len(embs) > 0)
+
+        if not has_embeddings:
+            return {"status": "skipped", "reason": "no embeddings found — re-ingest required", "nodes": len(files), "edges": 0}
 
         # Group embeddings by file_id
         file_embeddings = {}
-        embeddings_arr = np.array(all_data["embeddings"]) if not isinstance(all_data["embeddings"], np.ndarray) else all_data["embeddings"]
+        embeddings_arr = np.array(embs) if not isinstance(embs, np.ndarray) else embs
         for i, meta in enumerate(all_data["metadatas"]):
             fid = meta.get("file_id", "")
             is_parent = meta.get("is_parent")
@@ -60,8 +63,8 @@ def compute_graph(store, threshold: float = 0.65, max_edges_per_node: int = 8):
                 file_embeddings[fid].append(embeddings_arr[i])
 
         # Average embeddings per document
-        for fid, embs in file_embeddings.items():
-            arr = np.array(embs)
+        for fid, embs_list in file_embeddings.items():
+            arr = np.array(embs_list)
             avg = arr.mean(axis=0)
             norm = np.linalg.norm(avg)
             if norm > 0:

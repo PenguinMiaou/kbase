@@ -9,159 +9,125 @@ permissions:
   contents: write
 
 jobs:
-  build-macos:
-    runs-on: macos-latest
+  # ── Tauri Lite (online installer, ~5MB) ─────────────────────────
+  build-tauri-lite:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+            suffix: aarch64
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
+            suffix: x64
+          - platform: windows-latest
+            args: ""
+            suffix: x64
+
+    runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: '3.11'
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
-      - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install .
-          pip install jieba pyinstaller pyobjc-framework-Cocoa
+      - name: Install npm deps
+        working-directory: kbase-desktop
+        run: npm install
 
-      - name: Extract version
-        id: version
-        run: echo "VERSION=$(python -c "exec(open('kbase/__init__.py').read()); print(__version__)")" >> $GITHUB_OUTPUT
+      - name: Build Tauri (lite)
+        working-directory: kbase-desktop
+        run: npx tauri build ${{ matrix.args }}
 
-      - name: Create icon
-        run: |
-          mkdir -p build/KBase.iconset
-          python3 -c "
-          from PIL import Image, ImageDraw, ImageFont
-          import os
-          sizes = [16, 32, 64, 128, 256, 512]
-          iconset = 'build/KBase.iconset'
-          for s in sizes:
-              for scale, suffix in [(1, ''), (2, '@2x')]:
-                  sz = s * scale
-                  img = Image.new('RGBA', (sz, sz), (0, 0, 0, 0))
-                  draw = ImageDraw.Draw(img)
-                  cx, cy, r = sz/2, sz/2, sz*0.45
-                  for i in range(sz):
-                      for j in range(sz):
-                          dist = ((i-cx)**2 + (j-cy)**2)**0.5
-                          if dist < r:
-                              blue = int(120 + 80 * (1 - dist/r))
-                              img.putpixel((i, j), (30, 60, min(blue, 220), 255))
-                  try:
-                      font = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', int(sz*0.5))
-                  except:
-                      font = ImageFont.load_default()
-                  draw.text((sz*0.28, sz*0.18), 'K', fill=(255, 255, 255, 255), font=font)
-                  img.save(f'{iconset}/icon_{s}x{s}{suffix}.png', 'PNG')
-          " 2>/dev/null || echo "Icon generation skipped"
-          iconutil -c icns build/KBase.iconset -o build/KBase.icns 2>/dev/null || echo "iconutil skipped"
-
-      - name: Build with PyInstaller
-        run: |
-          pyinstaller kbase.spec --noconfirm
-
-      - name: Create DMG
-        run: |
-          VERSION=${{ steps.version.outputs.VERSION }}
-          STAGING=dist/dmg-staging
-          mkdir -p "$STAGING"
-          cp -R dist/KBase.app "$STAGING/"
-          ln -s /Applications "$STAGING/Applications"
-          hdiutil create -volname "KBase-${VERSION}" -srcfolder "$STAGING" -ov -format UDBZ "dist/KBase-${VERSION}.dmg"
-          rm -rf "$STAGING"
-
-      - name: Upload DMG artifact
+      - name: Upload macOS lite
+        if: matrix.platform == 'macos-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: KBase-macOS
-          path: dist/KBase-${{ steps.version.outputs.VERSION }}.dmg
+          name: KBase-lite-macOS-${{ matrix.suffix }}
+          path: kbase-desktop/src-tauri/target/*/release/bundle/dmg/*.dmg
 
-  build-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install .
-          pip install jieba pyinstaller pystray Pillow
-
-      - name: Extract version
-        id: version
-        shell: bash
-        run: echo "VERSION=$(python -c "exec(open('kbase/__init__.py').read()); print(__version__)")" >> $GITHUB_OUTPUT
-
-      - name: Create icon
-        shell: python
-        run: |
-          try:
-              from PIL import Image, ImageDraw
-              img = Image.new('RGBA', (256, 256), (0, 0, 0, 0))
-              draw = ImageDraw.Draw(img)
-              cx, cy, r = 128, 128, 115
-              for i in range(256):
-                  for j in range(256):
-                      dist = ((i-cx)**2 + (j-cy)**2)**0.5
-                      if dist < r:
-                          blue = int(120 + 80 * (1 - dist/r))
-                          img.putpixel((i, j), (30, 60, min(blue, 220), 255))
-              draw.text((80, 50), "K", fill=(255, 255, 255))
-              import os
-              os.makedirs("build", exist_ok=True)
-              img.save("build/KBase.ico", format="ICO",
-                       sizes=[(256,256),(128,128),(64,64),(48,48),(32,32),(16,16)])
-              print("Icon created")
-          except Exception as e:
-              print(f"Icon skipped: {e}")
-
-      - name: Copy build assets
-        shell: powershell
-        run: |
-          if (!(Test-Path "build")) { New-Item -ItemType Directory -Path "build" }
-          if (Test-Path "build/kbase.manifest") { Write-Host "Manifest exists" }
-          if (Test-Path "build/version_info.txt") { Write-Host "Version info exists" }
-
-      - name: Build with PyInstaller
-        run: pyinstaller kbase_win.spec --noconfirm
-
-      - name: Create ZIP
-        shell: powershell
-        run: |
-          $version = "${{ steps.version.outputs.VERSION }}"
-          # Add launcher bat to dist
-          Copy-Item "build\Start KBase.bat" "dist\KBase\" -ErrorAction SilentlyContinue
-          Compress-Archive -Path "dist\KBase\*" -DestinationPath "dist\KBase-${version}-Windows.zip" -Force
-
-      - name: Build Installer (Inno Setup)
-        shell: powershell
-        run: |
-          $version = "${{ steps.version.outputs.VERSION }}"
-          # Update version in installer script
-          (Get-Content build/installer.iss) -replace '0\.6\.3', $version | Set-Content build/installer.iss
-          # Copy icon for installer
-          if (Test-Path "build/KBase.ico") { Copy-Item "build/KBase.ico" "build/KBase.ico" }
-          # Run Inno Setup (pre-installed on GitHub Actions windows runners)
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" build/installer.iss
-        continue-on-error: true
-
-      - name: Upload Windows artifacts
+      - name: Upload Windows lite
+        if: matrix.platform == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: KBase-Windows
+          name: KBase-lite-Windows
           path: |
-            dist/KBase-${{ steps.version.outputs.VERSION }}-Windows.zip
-            dist/KBase-${{ steps.version.outputs.VERSION }}-Setup.exe
+            kbase-desktop/src-tauri/target/release/bundle/nsis/*.exe
+            kbase-desktop/src-tauri/target/release/bundle/msi/*.msi
 
+  # ── Tauri Fat (offline, bundled Python + model, ~500MB) ─────────
+  build-tauri-fat:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            suffix: aarch64
+          - platform: windows-latest
+            suffix: x64
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install npm deps
+        working-directory: kbase-desktop
+        run: npm install
+
+      - name: Build fat (macOS)
+        if: matrix.platform == 'macos-latest'
+        working-directory: kbase-desktop
+        run: bash build-fat.sh
+
+      - name: Build fat (Windows)
+        if: matrix.platform == 'windows-latest'
+        working-directory: kbase-desktop
+        run: build-fat.bat
+
+      - name: Upload macOS fat
+        if: matrix.platform == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: KBase-full-macOS-${{ matrix.suffix }}
+          path: kbase-desktop/src-tauri/target/release/bundle/dmg/*_full.dmg
+
+      - name: Upload Windows fat
+        if: matrix.platform == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: KBase-full-Windows
+          path: kbase-desktop/src-tauri/target/release/
+
+  # ── PyPI wheel ──────────────────────────────────────────────────
+  build-pypi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install build && python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KBase-PyPI
+          path: dist/*
+
+  # ── Release ─────────────────────────────────────────────────────
   release:
-    needs: [build-macos, build-windows]
+    needs: [build-tauri-lite, build-tauri-fat, build-pypi]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -170,8 +136,7 @@ jobs:
         id: version
         run: echo "VERSION=$(python3 -c "exec(open('kbase/__init__.py').read()); print(__version__)")" >> $GITHUB_OUTPUT
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: artifacts
 
@@ -182,18 +147,35 @@ jobs:
           body: |
             ## KBase v${{ steps.version.outputs.VERSION }}
 
-            ### Downloads
-            - **macOS**: `KBase-${{ steps.version.outputs.VERSION }}.dmg` — Double-click to install, drag to Applications
-            - **Windows**: `KBase-${{ steps.version.outputs.VERSION }}-Windows.zip` — Extract and run `KBase.exe`
-            - **Source**: Clone and run `bash install.sh` (macOS/Linux) or `install.bat` (Windows)
+            ### Download
 
-            ### Quick Start
-            1. Download for your platform
-            2. Run KBase — browser opens automatically at http://127.0.0.1:8765
-            3. Go to Settings to configure your LLM API key
-            4. Use Ingest tab to add your documents
+            | Platform | Online (~5MB) | Offline (~500MB) |
+            |----------|--------------|-----------------|
+            | macOS (Apple Silicon) | `KBase_*_aarch64.dmg` | `KBase_*_aarch64_full.dmg` |
+            | macOS (Intel) | `KBase_*_x64.dmg` | — |
+            | Windows | `KBase_*_x64-setup.exe` | Coming soon |
+
+            **Online version** downloads Python + dependencies on first launch (~2 min).
+            **Offline version** includes everything — no internet needed.
+
+            ### Alternative Install
+            ```bash
+            # One command (macOS/Linux)
+            curl -LsSf https://astral.sh/uv/install.sh | sh && uv tool install kbase-app
+
+            # pip
+            pip install kbase-app
+            ```
+
+            ### What's New
+            - Native desktop app (Tauri WebView) — no more browser tab
+            - Online + Offline installer options
+            - `uv`-based installer — fast, reliable, isolated Python
+            - Published on PyPI: `pip install kbase-app`
           files: |
-            artifacts/KBase-macOS/*
-            artifacts/KBase-Windows/*
+            artifacts/**/*.dmg
+            artifacts/**/*.exe
+            artifacts/**/*.msi
+            artifacts/KBase-PyPI/*
           draft: false
           prerelease: false

@@ -1992,6 +1992,7 @@ print(path)
     async def api_save_settings(request: Request):
         body = await request.json()
         current = load_settings(workspace)
+        old_embedding_model = current.get("embedding_model", "bge-small-zh")
         # Security: don't overwrite real API keys with masked values (***xxxx)
         for key in list(body.keys()):
             if ("api_key" in key.lower() or "secret" in key.lower()):
@@ -2000,7 +2001,24 @@ print(path)
                     del body[key]  # Keep the existing real key
         current.update(body)
         save_settings(workspace, current)
-        return {"status": "saved", "settings": current}
+
+        # Detect embedding model change — rebuild ChromaDB collection
+        new_embedding_model = current.get("embedding_model", "bge-small-zh")
+        embedding_changed = new_embedding_model != old_embedding_model
+        if embedding_changed:
+            try:
+                store = _get_store()
+                store.rebuild_chromadb(new_embedding_model)
+                print(f"[KBase] Embedding model changed: {old_embedding_model} → {new_embedding_model}. "
+                      f"ChromaDB cleared. Re-ingest required.")
+            except Exception as e:
+                print(f"[KBase] ChromaDB rebuild on model switch failed: {e}")
+
+        resp = {"status": "saved", "settings": current}
+        if embedding_changed:
+            resp["embedding_changed"] = True
+            resp["message"] = f"Embedding model changed to {new_embedding_model}. Please re-sync all directories."
+        return resp
 
     # ---- Shutdown ----
 
@@ -3463,10 +3481,14 @@ async function saveSettings(){
       else if(mm.type==='voyageai')settings.voyage_api_key=keyEl.value;
     }
   });
-  await fetchJSON('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(settings)});
+  const resp=await fetchJSON('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(settings)});
   const el=document.getElementById('settings-msg');
-  el.innerHTML='<div class="text-green-300 py-2">Saved!</div>';
-  setTimeout(()=>el.innerHTML='',3000);
+  if(resp&&resp.embedding_changed){
+    el.innerHTML='<div class="text-yellow-300 py-2">Embedding model changed. Please re-sync all directories to rebuild embeddings.</div>';
+  } else {
+    el.innerHTML='<div class="text-green-300 py-2">Saved!</div>';
+    setTimeout(()=>el.innerHTML='',3000);
+  }
   if(settings.llm_provider)document.getElementById('chat-provider').value=settings.llm_provider;
   if(settings.buddy_preset)document.getElementById('chat-buddy').value=settings.buddy_preset;
 }

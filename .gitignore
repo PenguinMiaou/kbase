@@ -11,3 +11,6 @@ dist/
 *.spec
 !kbase.spec
 !kbase_win.spec
+kbase-desktop/src-tauri/target/
+kbase-desktop/node_modules/
+setup.py.bak

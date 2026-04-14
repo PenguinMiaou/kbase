@@ -221,7 +221,12 @@ def ingest_directory(
             except Exception as e:
                 print(f"[KBase] Summary skipped for {file_path.name}: {e}")
 
-            # Index
+            # Index (with chunk-level progress for large files)
+            def _chunk_cb(done, total):
+                _ingest_progress["status"] = f"embedding {done}/{total}"
+                if progress_callback:
+                    progress_callback(i + 1, len(files), file_path.name, f"embedding {done}/{total} chunks")
+
             store.index_document(
                 fp,
                 result["text"],
@@ -229,6 +234,7 @@ def ingest_directory(
                 result.get("tables", []),
                 result["metadata"],
                 summary=summary,
+                chunk_progress_cb=_chunk_cb if len(chunks) > 20 else None,
             )
 
             stats["processed"] += 1

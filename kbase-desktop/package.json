@@ -1,0 +1,14 @@
+{
+  "name": "kbase-desktop",
+  "version": "0.7.0",
+  "description": "KBase Desktop — Native Knowledge Base App",
+  "private": true,
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1"
+  }
+}

@@ -12,7 +12,7 @@ Turn any directory of files into a searchable, AI-powered knowledge base.
 - **LLM**: 20 providers (Claude/GPT/Gemini/DeepSeek/Qwen/GLM/Kimi/Doubao/Ollama/Claude CLI/Qwen CLI/LLM CLI/Custom)
 - **File types**: PPTX, DOCX, XLSX, PDF, MD, HTML, MP3/M4A (Whisper), ZIP, EML, MBOX
 - **Memory**: Global cross-conversation memory system with auto-extraction
-- **Distribution**: DMG installer (PyInstaller) + install.sh/bat + auto-update
+- **Distribution**: Tauri native app (DMG/MSI) + PyPI (`pip install kbase-app`) + uv installer + install.sh/bat
 
 ## Project Structure
 ```
@@ -41,14 +41,16 @@ kbase/
 │       ├── js/app.js    # Frontend logic (i18n, session titles, memory, model status, auto-update, progress)
 │       └── logos/       # Provider logos (26+ SVG/PNG/WebP)
 ├── launcher.py          # Cross-platform app entry point (macOS menu bar / Windows system tray / generic)
-├── kbase.spec           # PyInstaller spec for macOS DMG build
-├── kbase_win.spec       # PyInstaller spec for Windows EXE build
-├── build_dmg.sh         # One-click macOS DMG builder script
-├── build_exe.bat        # One-click Windows EXE builder script
-├── .github/workflows/release.yml  # GitHub Actions CI — auto-build DMG + EXE on tag push
+├── kbase-desktop/       # Tauri native app shell (Rust + WebView)
+│   ├── src-tauri/       # Rust: sidecar Python process, system tray, auto-update
+│   ├── src/             # Splash page (loading → redirect to localhost)
+│   └── scripts/         # Python env bootstrap (uv install)
+├── kbase.spec           # PyInstaller spec for macOS DMG build (legacy)
+├── kbase_win.spec       # PyInstaller spec for Windows EXE build (legacy)
+├── .github/workflows/release.yml  # GitHub Actions CI — Tauri DMG/MSI + PyPI wheel
 ├── version.json         # Remote version manifest (multi-platform download URLs)
-├── install.sh / install.bat  # One-click install (CLI wrapper = kbase-cli, not kbase to avoid dir conflict)
-├── setup.py
+├── pyproject.toml       # Modern Python packaging (replaces setup.py)
+├── install.sh / install.bat  # One-click install via uv (auto-installs Python 3.12)
 ├── requirements.txt
 └── README.md
 ```
@@ -98,16 +100,15 @@ ollama, claude-cli (`claude -p`), qwen-cli (`qwen -p`), llm-cli (`llm`), custom 
 - **One-click update**: `/api/update/download` (SSE with progress) → `/api/update/install` (download DMG/ZIP, run updater script, restart)
 
 ## Distribution
-- **Source install**: `git clone` + `bash install.sh` → creates `.venv` + `kbase-cli` wrapper
-- **DMG install**: `bash build_dmg.sh` → `dist/KBase-{VERSION}.dmg` (PyInstaller)
-  - Double-click DMG → drag to Applications → opens browser automatically
-  - macOS menu bar "KB" icon (NSApplicationActivationPolicyAccessory)
-  - Icon: purple gradient rounded rect + white K (from kbase-logo.svg)
-- **Windows EXE**: `build_exe.bat` → `dist/KBase-{VERSION}-Windows.zip` (PyInstaller)
-  - Extract and run KBase.exe → opens browser automatically
-  - System tray icon (pystray) with "Open in Browser" / "Quit"
-- **Windows source**: `install.bat` → creates `.venv` + `kbase.bat` wrapper
-- **GitHub Actions CI**: Push `v*` tag → auto-builds macOS DMG + Windows EXE → uploads to GitHub Releases
+- **Tauri desktop app** (primary): Native window (WKWebView/WebView2), system tray, ~4MB DMG
+  - `kbase-desktop/` — Rust shell spawns Python sidecar, loads localhost in WebView
+  - `npm run build` in kbase-desktop/ → `.app` + `.dmg` (macOS) / `.msi` + `.exe` (Windows)
+- **PyPI**: `pip install kbase-app` or `uv tool install kbase-app`
+  - Entry points: `kbase` (CLI), `kbase-desktop` (native window via pywebview)
+- **uv installer** (recommended for new users): `bash install.sh`
+  - Auto-installs uv → Python 3.12 → kbase-app (isolated venv, no system pollution)
+- **Legacy PyInstaller**: `kbase.spec` / `kbase_win.spec` still available but not recommended
+- **GitHub Actions CI**: Push `v*` tag → Tauri DMG/MSI + PyPI wheel → GitHub Releases
 
 ## UI Features (New)
 - **Session management**: Auto-generated titles, sidebar date grouping (Today/Yesterday/7 Days/Older), timestamps

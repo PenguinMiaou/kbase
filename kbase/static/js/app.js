@@ -1333,10 +1333,21 @@ async function doIngestNew(){
       }else{
         const pct=d.total?Math.round(d.current/d.total*100):0;
         if(bar)bar.style.width=pct+'%';
-        const label=d.status==='paused'?'Paused':d.status==='skipped'?'Skipping':'Processing';
+        const isEmbedding=d.status&&d.status.startsWith('embedding');
+        const label=d.status==='paused'?'Paused':d.status==='skipped'?'Skipping':isEmbedding?'Embedding':' Processing';
         if(status)status.textContent=`${label} (${d.current}/${d.total})`;
         if(count)count.textContent=pct+'%';
-        if(file)file.textContent=d.name||'';
+        // Show chunk sub-progress for large files
+        const fileEl=document.getElementById('ingest-file');
+        if(isEmbedding){
+          const m=d.status.match(/embedding (\d+)\/(\d+)/);
+          if(m){
+            const cDone=parseInt(m[1]),cTotal=parseInt(m[2]),cPct=Math.round(cDone/cTotal*100);
+            if(fileEl)fileEl.innerHTML=`${esc(d.name||'')} <span style="color:var(--accent);font-weight:500;">[${cDone}/${cTotal} chunks ${cPct}%]</span>`;
+          }
+        }else{
+          if(fileEl)fileEl.textContent=d.name||'';
+        }
         // ETA calculation
         const eta=document.getElementById('ingest-eta');
         if(eta&&d.current>10&&d.total>0){

@@ -1,4 +1,4 @@
-"""KBase Cross-Platform App Launcher — starts web server, opens browser, keeps alive."""
+"""KBase Cross-Platform App Launcher — starts web server + opens UI."""
 import multiprocessing
 import os
 import platform
@@ -16,16 +16,6 @@ except ImportError:
 
 IS_WINDOWS = platform.system() == "Windows"
 IS_MACOS = platform.system() == "Darwin"
-
-# Fix for PyInstaller bundled app
-if getattr(sys, 'frozen', False):
-    os.environ['MPLCONFIGDIR'] = os.path.join(os.path.expanduser('~'), '.kbase', 'mpl')
-    bundle_dir = sys._MEIPASS
-    os.environ['PATH'] = bundle_dir + os.pathsep + os.environ.get('PATH', '')
-    # Add user-installed packages
-    user_pkgs = os.path.join(os.path.expanduser('~'), '.kbase', 'python_packages')
-    if os.path.isdir(user_pkgs) and user_pkgs not in sys.path:
-        sys.path.insert(0, user_pkgs)
 
 
 def check_libreoffice():
