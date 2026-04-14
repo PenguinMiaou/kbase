@@ -282,22 +282,31 @@ fn main() {
                 let already_running = is_server_running().await;
 
                 if already_running {
-                    // Server already up — just navigate
                     navigate_to_server(&app_handle).await;
-                    return;
+                } else {
+                    let python_ready = find_python().is_some();
+                    if python_ready {
+                        start_and_navigate(&app_handle).await;
+                    } else {
+                        if let Some(w) = app_handle.get_webview_window("main") {
+                            let _ = w.show();
+                        }
+                        return; // Frontend handles setup
+                    }
                 }
 
-                let python_ready = find_python().is_some();
-
-                if python_ready {
-                    // Python found — start server
-                    start_and_navigate(&app_handle).await;
-                } else {
-                    // No Python — show setup UI, let frontend handle install
-                    if let Some(w) = app_handle.get_webview_window("main") {
-                        let _ = w.show();
+                // Monitor server health — exit Tauri if server stops
+                loop {
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    if !is_server_running().await {
+                        // Server stopped (user clicked Exit or process crashed)
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        // Double-check
+                        if !is_server_running().await {
+                            app_handle.exit(0);
+                            return;
+                        }
                     }
-                    // Frontend will call run_setup(), then we start server
                 }
             });
 
