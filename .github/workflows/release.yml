@@ -22,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install -e .
+          pip install .
           pip install jieba pyinstaller pyobjc-framework-Cocoa
 
       - name: Extract version
@@ -91,7 +91,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install -e .
+          pip install .
           pip install jieba pyinstaller pystray Pillow
 
       - name: Extract version
