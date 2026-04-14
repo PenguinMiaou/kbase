@@ -86,6 +86,8 @@ exe = EXE(
     upx=False,
     console=False,  # No terminal window (GUI mode)
     icon='build\\KBase.ico' if os.path.exists('build\\KBase.ico') else None,
+    manifest='build\\kbase.manifest' if os.path.exists('build\\kbase.manifest') else None,
+    version='build\\version_info.txt' if os.path.exists('build\\version_info.txt') else None,
 )
 
 coll = COLLECT(

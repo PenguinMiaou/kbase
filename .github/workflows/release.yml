@@ -122,6 +122,13 @@ jobs:
           except Exception as e:
               print(f"Icon skipped: {e}")
 
+      - name: Copy build assets
+        shell: powershell
+        run: |
+          if (!(Test-Path "build")) { New-Item -ItemType Directory -Path "build" }
+          if (Test-Path "build/kbase.manifest") { Write-Host "Manifest exists" }
+          if (Test-Path "build/version_info.txt") { Write-Host "Version info exists" }
+
       - name: Build with PyInstaller
         run: pyinstaller kbase_win.spec --noconfirm
 
@@ -129,13 +136,29 @@ jobs:
         shell: powershell
         run: |
           $version = "${{ steps.version.outputs.VERSION }}"
+          # Add launcher bat to dist
+          Copy-Item "build\Start KBase.bat" "dist\KBase\" -ErrorAction SilentlyContinue
           Compress-Archive -Path "dist\KBase\*" -DestinationPath "dist\KBase-${version}-Windows.zip" -Force
 
-      - name: Upload Windows artifact
+      - name: Build Installer (Inno Setup)
+        shell: powershell
+        run: |
+          $version = "${{ steps.version.outputs.VERSION }}"
+          # Update version in installer script
+          (Get-Content build/installer.iss) -replace '0\.6\.3', $version | Set-Content build/installer.iss
+          # Copy icon for installer
+          if (Test-Path "build/KBase.ico") { Copy-Item "build/KBase.ico" "build/KBase.ico" }
+          # Run Inno Setup (pre-installed on GitHub Actions windows runners)
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" build/installer.iss
+        continue-on-error: true
+
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: KBase-Windows
-          path: dist/KBase-${{ steps.version.outputs.VERSION }}-Windows.zip
+          path: |
+            dist/KBase-${{ steps.version.outputs.VERSION }}-Windows.zip
+            dist/KBase-${{ steps.version.outputs.VERSION }}-Setup.exe
 
   release:
     needs: [build-macos, build-windows]
