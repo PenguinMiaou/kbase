@@ -133,8 +133,11 @@ class KBaseStore:
 
         # SQLite for metadata + FTS + tabular
         self.db_path = get_db_path(workspace)
-        self.conn = sqlite3.connect(str(self.db_path))
+        self.conn = sqlite3.connect(str(self.db_path), timeout=10)
         self.conn.row_factory = sqlite3.Row
+        # Enable WAL mode: allows concurrent reads during writes (critical for ingest + UI)
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA busy_timeout=5000")
         self._init_sqlite()
 
         # ChromaDB for vector search
@@ -362,7 +365,8 @@ class KBaseStore:
             return False
 
     def index_document(self, file_path: str, text: str, chunks: list[dict],
-                       tables: list[dict], metadata: dict, summary: str = ""):
+                       tables: list[dict], metadata: dict, summary: str = "",
+                       chunk_progress_cb=None):
         """Index a document: vector + FTS + tabular."""
         fid = self.file_id(file_path)
         p = Path(file_path)
@@ -420,15 +424,18 @@ class KBaseStore:
                     (cid, fid, p.name, str(p), fts_text),
                 )
 
-            # Batch add to ChromaDB
-            batch_size = 100
-            for start in range(0, len(chunk_ids), batch_size):
+            # Batch add to ChromaDB (embedding happens here — slowest step)
+            batch_size = 50
+            total_chunks = len(chunk_ids)
+            for start in range(0, total_chunks, batch_size):
                 end = start + batch_size
                 self.collection.add(
                     ids=chunk_ids[start:end],
                     documents=chunk_texts[start:end],
                     metadatas=chunk_metas[start:end],
                 )
+                if chunk_progress_cb:
+                    chunk_progress_cb(min(end, total_chunks), total_chunks)
 
         # Index tables in SQLite
         for table_data in tables:
