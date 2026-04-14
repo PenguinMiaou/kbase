@@ -444,6 +444,78 @@ def _detect_intent(question: str) -> str:
     return "kb"
 
 
+MAX_MEMORIES = 100  # Hard cap on total stored memories
+
+
+def _select_relevant_memories(question: str, max_items: int = 10) -> list[str]:
+    """Select memories most relevant to the current question.
+
+    Strategy: keyword overlap scoring + recency boost.
+    Falls back to most recent if no keyword match.
+    """
+    if not _global_memories:
+        return []
+
+    import jieba
+    q_words = set(jieba.cut(question.lower()))
+    # Remove stopwords
+    q_words -= {"的", "是", "了", "在", "和", "与", "有", "被", "对", "等", "用",
+                "个", "这", "那", "要", "会", "就", "都", "也", "我", "你", "他",
+                "什么", "怎么", "如何", "吗", "呢", "吧", "啊", "哪"}
+
+    scored = []
+    now = __import__("time").time()
+    for i, mem in enumerate(_global_memories):
+        content = mem.get("content", "")
+        mem_words = set(jieba.cut(content.lower()))
+        # Keyword overlap score
+        overlap = len(q_words & mem_words)
+        # Recency score: newer memories get slight boost (decay over 30 days)
+        created = mem.get("created_at", "")
+        recency = 0.1  # default low
+        if created:
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(created, "%Y-%m-%d %H:%M")
+                age_days = (now - dt.timestamp()) / 86400
+                recency = max(0, 1.0 - age_days / 30)  # 0~1, decays over 30 days
+            except (ValueError, TypeError):
+                pass
+        score = overlap * 2 + recency
+        scored.append((score, i, content))
+
+    # Sort by score desc, take top N
+    scored.sort(key=lambda x: -x[0])
+    selected = [s[2] for s in scored[:max_items]]
+    return selected
+
+
+def _deduplicate_memories():
+    """Remove duplicate/similar memories. Keep the newer one."""
+    if len(_global_memories) <= 1:
+        return
+    from difflib import SequenceMatcher
+    seen = []
+    deduped = []
+    for mem in reversed(_global_memories):  # newest first
+        content = mem.get("content", "").strip()
+        is_dup = False
+        for s in seen:
+            if SequenceMatcher(None, content, s).ratio() > 0.7:
+                is_dup = True
+                break
+        if not is_dup:
+            seen.append(content)
+            deduped.append(mem)
+    deduped.reverse()
+    if len(deduped) < len(_global_memories):
+        removed = len(_global_memories) - len(deduped)
+        _global_memories.clear()
+        _global_memories.extend(deduped[-MAX_MEMORIES:])  # also enforce cap
+        _save_memories()
+        print(f"[KBase] Memory dedup: removed {removed} duplicates, {len(_global_memories)} remaining")
+
+
 def _compute_context_budget(question: str, results: list) -> int:
     """Dynamically compute how many context chunks to include.
 
@@ -588,11 +660,12 @@ def chat(store: KBaseStore, question: str, settings: dict = None,
     if buddy_mode == "custom" and settings.get("custom_buddy_prompt"):
         buddy_extra = settings["custom_buddy_prompt"]
 
-    # 4. Build system prompt (inject global memories if available)
+    # 4. Build system prompt (inject relevant memories)
     memory_context = ""
     if _global_memories:
-        mem_lines = [m["content"] for m in _global_memories[-20:]]
-        memory_context = "\n\nUser Memory (facts learned from previous conversations):\n" + "\n".join(f"- {l}" for l in mem_lines)
+        mem_lines = _select_relevant_memories(question, max_items=10)
+        if mem_lines:
+            memory_context = "\n\nUser Memory (facts learned from previous conversations):\n" + "\n".join(f"- {l}" for l in mem_lines)
     prompt_template = SYSTEM_PROMPTS.get(search_mode, SYSTEM_PROMPTS["kb"])
     system = prompt_template.format(context=context, buddy_extra=buddy_extra) + memory_context
 
@@ -752,6 +825,8 @@ def extract_memories_from_conversation(conversation_id: str, settings: dict = No
             for line in lines[:5]:
                 entry = add_memory(line, source=f"conv:{conversation_id}")
                 new_mems.append(entry)
+            # Deduplicate and enforce cap after each extraction
+            _deduplicate_memories()
             return new_mems
     except Exception:
         pass
@@ -955,26 +1030,30 @@ def _call_cli(provider, messages, system, settings):
             f"Searched: {', '.join(extra_paths[:5])}..."
         )
 
-    # Build prompt — keep it concise for CLI tools
-    # For claude -p: just send the user question with context as a single prompt
+    # Build prompt — keep it concise for CLI tools (they're slow with long input)
     user_question = messages[-1]["content"] if messages else ""
-    # Trim system prompt to essentials (context + rules)
+    # CLI tools have limited throughput — cap prompt at ~4000 chars
+    max_prompt = 4000
+    if len(system) > max_prompt:
+        # Keep the first part (instructions) and truncate context
+        system = system[:max_prompt] + "\n... (context truncated for CLI mode)"
     full_prompt = f"{system}\n\nUser question: {user_question}"
 
+    cli_timeout = int(settings.get("cli_timeout", 120))
     try:
         result = subprocess.run(
             cmd_parts,
             input=full_prompt,
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=cli_timeout,
         )
         if result.returncode != 0:
             stderr = result.stderr.strip()
             raise ValueError(f"CLI error (exit {result.returncode}): {stderr[:500]}")
         return result.stdout.strip()
     except subprocess.TimeoutExpired:
-        raise ValueError(f"CLI timed out after 120s")
+        raise ValueError(f"CLI timed out after {cli_timeout}s. Try a shorter question or switch to a cloud LLM.")
     except FileNotFoundError:
         raise ValueError(f"'{executable}' not found")
 
