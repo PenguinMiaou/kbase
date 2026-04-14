@@ -132,6 +132,8 @@ def create_app(workspace: str = "default") -> FastAPI:
     def get_store():
         return KBaseStore(workspace)
 
+    _stats_cache = [{"file_count": 0, "chunk_count": 0, "table_count": 0, "error_count": 0, "type_counts": {}}]
+
     # ---- Search API ----
 
     @app.get("/api/search")
@@ -166,21 +168,17 @@ def create_app(workspace: str = "default") -> FastAPI:
             store.close()
 
     @app.get("/api/status")
-    _last_stats = {"file_count": 0, "chunk_count": 0, "table_count": 0, "error_count": 0, "type_counts": {}}
-
     def api_status():
-        nonlocal _last_stats
         try:
             store = get_store()
             try:
                 stats = store.get_stats()
-                _last_stats = stats  # Cache for when DB is locked
+                _stats_cache[0] = stats
                 return stats
             finally:
                 store.close()
         except Exception:
-            # DB locked during ingest — return cached stats
-            return {**_last_stats, "workspace": workspace, "db_locked": True}
+            return {**_stats_cache[0], "workspace": workspace, "db_locked": True}
 
     @app.get("/api/files")
     def api_files(source_dir: str = Query(None)):
