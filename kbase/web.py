@@ -2039,6 +2039,114 @@ print(path)
         threading.Thread(target=_do_shutdown, daemon=True).start()
         return {"status": "shutting down"}
 
+    # ---- Document Skills ----
+
+    @app.post("/api/skill/run")
+    async def api_skill_run(request: Request):
+        """Run a document skill (enrich/modify). Returns SSE progress stream."""
+        body = await request.json()
+        instruction = body.get("instruction", "")
+        file_id = body.get("file_id")
+        file_path = body.get("file_path")
+        use_kb = body.get("use_knowledge_base", True)
+        use_web = body.get("use_web_search", True)
+
+        if not instruction:
+            raise HTTPException(400, "instruction is required")
+
+        # Resolve file path
+        if file_id and not file_path:
+            store = get_store()
+            row = store.conn.execute("SELECT file_path FROM files WHERE file_id = ?", (file_id,)).fetchone()
+            if row:
+                file_path = row["file_path"]
+        if not file_path or not Path(file_path).exists():
+            raise HTTPException(400, f"File not found: {file_path or file_id}")
+
+        import queue as _queue
+        progress_q = _queue.Queue()
+
+        def do_skill():
+            try:
+                from kbase.skills.harness import SkillHarness
+                from kbase.chat import _call_llm, LLM_PROVIDERS
+
+                settings_data = load_settings(workspace)
+                provider_key = settings_data.get("llm_provider", "claude-sonnet")
+                provider = LLM_PROVIDERS.get(provider_key, LLM_PROVIDERS.get("claude-sonnet"))
+
+                def llm_func(prompt):
+                    return _call_llm(
+                        provider,
+                        [{"role": "user", "content": prompt}],
+                        "You are a document modification expert. Follow instructions precisely. Output only what is asked.",
+                        settings_data,
+                    )
+
+                harness = SkillHarness(llm_func=llm_func, progress_queue=progress_q)
+                result = harness.run_document_enrich(
+                    instruction=instruction,
+                    file_path=file_path,
+                    use_kb=use_kb,
+                    use_web=use_web,
+                )
+                progress_q.put(json.dumps({"type": "done", **result}))
+            except Exception as e:
+                progress_q.put(json.dumps({"type": "error", "message": str(e)}))
+
+        import threading
+        threading.Thread(target=do_skill, daemon=True).start()
+
+        def event_stream():
+            while True:
+                try:
+                    msg = progress_q.get(timeout=300)
+                    yield f"data: {msg}\n\n"
+                    data = json.loads(msg)
+                    if data.get("type") in ("done", "error", "complete"):
+                        break
+                except Exception:
+                    yield f"data: {json.dumps({'type': 'error', 'message': 'timeout'})}\n\n"
+                    break
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    @app.get("/api/skill/download/{filename}")
+    def api_skill_download(filename: str):
+        """Download a skill output file."""
+        outputs_dir = Path.home() / ".kbase" / "default" / "outputs"
+        fp = outputs_dir / filename
+        if not fp.exists():
+            raise HTTPException(404, f"File not found: {filename}")
+        # Determine media type
+        media_types = {
+            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".pdf": "application/pdf",
+        }
+        mt = media_types.get(fp.suffix, "application/octet-stream")
+        return FileResponse(str(fp), media_type=mt, filename=filename,
+                            headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+    @app.get("/api/skill/outputs")
+    def api_skill_outputs():
+        """List all skill output files."""
+        outputs_dir = Path.home() / ".kbase" / "default" / "outputs"
+        if not outputs_dir.exists():
+            return {"files": []}
+        files = []
+        for f in sorted(outputs_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+            if f.is_file() and not f.name.startswith("."):
+                files.append({
+                    "name": f.name,
+                    "type": f.suffix,
+                    "size_mb": round(f.stat().st_size / 1048576, 2),
+                    "modified": f.stat().st_mtime,
+                    "download_url": f"/api/skill/download/{f.name}",
+                })
+        return {"files": files[:50]}
+
     # ---- Frontend ----
 
     @app.get("/", response_class=HTMLResponse)
