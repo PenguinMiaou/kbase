@@ -35,7 +35,7 @@
     animation: spin 0.8s linear infinite;
     margin: 0 auto 16px;
   }
-  .status { color: #64748b; font-size: 13px; min-height: 20px; }
+  .status { color: #64748b; font-size: 13px; min-height: 20px; white-space: pre-line; }
 
   /* Setup UI */
   #setup-panel { display: none; margin-top: 24px; }
@@ -186,9 +186,9 @@
         return;
       }
       const dots = '.'.repeat((pollAttempts % 3) + 1);
-      let msg = 'Starting server' + dots;
-      if (pollAttempts > 10) msg = '正在下载 AI 模型（首次约 1-2 分钟）' + dots;
-      if (pollAttempts > 60) msg = '模型下载中，请稍候' + dots;
+      let msg = '正在启动服务 / Starting server' + dots;
+      if (pollAttempts > 10) msg = '正在下载 AI 模型（首次约 1-2 分钟）\nDownloading AI model (1-2 min on first launch)' + dots;
+      if (pollAttempts > 60) msg = '模型下载中，请耐心等待\nModel download in progress, please wait' + dots;
       document.getElementById('status').textContent = msg;
       setTimeout(pollServer, 500);
     }
