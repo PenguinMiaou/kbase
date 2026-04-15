@@ -790,18 +790,18 @@ class KBaseStore:
                 if fpath in seen_files or self._is_path_disabled(fpath):
                     continue
                 seen_files.add(fpath)
-                    # Get first chunk of this file
-                    c2 = self.conn.cursor()
-                    c2.execute("SELECT chunk_id, file_id, text FROM fts_chunks WHERE file_path=? LIMIT 1", (fpath,))
-                    chunk = c2.fetchone()
-                    if chunk:
-                        items.append({
-                            "chunk_id": chunk["chunk_id"],
-                            "text": chunk["text"],
-                            "score": 0.6,
-                            "metadata": {"file_id": chunk["file_id"], "file_name": row["file_name"], "file_path": fpath},
-                            "method": "filename",
-                        })
+                # Get first chunk of this file
+                c2 = self.conn.cursor()
+                c2.execute("SELECT chunk_id, file_id, text FROM fts_chunks WHERE file_path=? LIMIT 1", (fpath,))
+                chunk = c2.fetchone()
+                if chunk:
+                    items.append({
+                        "chunk_id": chunk["chunk_id"],
+                        "text": chunk["text"],
+                        "score": 0.6,
+                        "metadata": {"file_id": chunk["file_id"], "file_name": row["file_name"], "file_path": fpath},
+                        "method": "filename",
+                    })
 
             # 2. LIKE fallback (text is jieba-segmented)
             import jieba as _jieba
