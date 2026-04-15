@@ -699,6 +699,24 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* === Chunk locate highlight in artifact panel === */
+@keyframes chunk-locate-flash {
+  0% { background: rgba(250, 204, 21, 0.35); border-color: #facc15; }
+  100% { background: var(--accent-light); border-color: var(--accent); }
+}
+.chunk-locate-hint {
+  padding: 8px 12px;
+  background: var(--accent-light);
+  border-radius: 6px;
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.chunk-locate-hint em { color: var(--accent); font-style: normal; }
+
 /* === Buttons (shared) === */
 .btn-accent {
   padding: 10px 16px;

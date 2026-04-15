@@ -756,8 +756,9 @@ function renderSources(kbSrc,webSrc){
     const sid='src-'+Date.now()+'-'+i;
     const fext=((s.name||'').split('.').pop()||'').toLowerCase();
     const fname=(s.name||'').length>40?(s.name||'').substring(0,37)+'...':s.name||'';
-    h+=`<span class="msg-source" id="${sid}" onclick="showFilePreviewByMeta({id:'',label:'${esc(s.name||'')}',file_path:'${(s.path||'').replace(/'/g,"\\'")}',file_type:'.${fext}',degree:0,chunk_count:0})"\
-      data-preview="${preview}" data-name="${esc(s.name||'')}" data-path="${esc(s.path||'')}"\
+    const chunkMeta=JSON.stringify({page:s.page||null,slide:s.slide||null,heading:s.heading||null,sheet:s.sheet||null,preview:s.preview||''}).replace(/'/g,'&#39;').replace(/"/g,'&quot;');
+    h+=`<span class="msg-source" id="${sid}" onclick="showFilePreviewByMeta({id:'${s.file_id||''}',label:'${esc(s.name||'')}',file_path:'${(s.path||'').replace(/'/g,"\\'")}',file_type:'.${fext}',degree:0,chunk_count:0},this.dataset.chunk)"\
+      data-preview="${preview}" data-name="${esc(s.name||'')}" data-path="${esc(s.path||'')}" data-chunk="${chunkMeta}"\
       onmouseenter="showSourcePreview(event,this)" onmouseleave="hideSourcePreview()">
       ${fileTypeIcon(fext,14)}
       ${esc(fname)}</span>`;
@@ -3493,8 +3494,12 @@ function selectSearchResult(el){
     }
   }catch(_){}
 }
-function showFilePreviewByMeta(meta){
-  showFilePreview(meta);
+function showFilePreviewByMeta(meta, chunkJson){
+  let chunk=null;
+  if(chunkJson){
+    try{chunk=JSON.parse(chunkJson);}catch(_){}
+  }
+  showFilePreview(meta, chunk);
 }
 
 let _searchTopK=50;
@@ -3524,7 +3529,7 @@ function filterSearchResults(){
 // --- PPTX Slide Viewer ---
 let _slideData=null;
 let _slideIndex=0;
-async function loadSlides(fileId){
+async function loadSlides(fileId, startSlide){
   const bar=document.getElementById('slide-progress-bar');
   const counter=document.getElementById('slide-counter');
   // Simulate progress during server conversion
@@ -3538,7 +3543,7 @@ async function loadSlides(fileId){
     clearInterval(progressTimer);
     if(bar){bar.style.width='100%';}
     _slideData=d;
-    _slideIndex=0;
+    _slideIndex=startSlide?Math.max(0,Math.min(parseInt(startSlide)-1,d.total-1)):0;
     // Hide progress bar after complete
     setTimeout(()=>{
       const prog=document.getElementById('slide-progress');
@@ -3643,7 +3648,7 @@ function formatChunkContent(text){
 }
 
 // --- File preview in artifact panel ---
-async function showFilePreview(nodeData){
+async function showFilePreview(nodeData, chunkLocator){
   const panel=document.getElementById('artifact-panel');
   if(!panel)return;
   panel.style.display='flex';
@@ -3657,6 +3662,18 @@ async function showFilePreview(nodeData){
   const bodyEl=document.getElementById('artifact-body');
   if(titleEl)titleEl.textContent=nodeData.label||'File Preview';
   if(bodyEl)bodyEl.innerHTML='<p style="color:var(--text-muted);font-size:13px;">Loading...</p>';
+
+  // Resolve file_id if missing
+  if(!nodeData.id&&nodeData.file_path){
+    try{
+      const lookup=await api(`/api/file-lookup?path=${encodeURIComponent(nodeData.file_path)}`);
+      nodeData.id=lookup.file_id;
+    }catch(e){
+      // Fallback: open in Finder
+      if(nodeData.file_path)openFile(nodeData.file_path);
+      return;
+    }
+  }
 
   try{
     const d=await api(`/api/file-preview/${nodeData.id}`);
@@ -3723,7 +3740,19 @@ async function showFilePreview(nodeData){
     const spreadTypes=['xlsx','xls','csv'];
     const docTypes=['docx','doc'];
 
-    if(ext==='pdf'||ext==='html'||ext==='htm'){
+    if(ext==='pdf'){
+      // PDF: use iframe with hash to jump to page, and text search overlay
+      const pageHash=chunkLocator&&chunkLocator.page?`#page=${chunkLocator.page}`:'';
+      html+=`<iframe id="pdf-preview-frame" src="/api/file-serve/${nodeData.id}${pageHash}" style="width:100%;height:calc(100vh - 300px);border:none;background:#fff;"></iframe>`;
+      if(chunkLocator&&chunkLocator.preview){
+        // Add a "locate in PDF" button that uses browser find
+        const searchText=chunkLocator.preview.substring(0,60).replace(/[<>"'&]/g,'');
+        html+=`<div style="padding:8px 12px;background:var(--accent-light);border-radius:6px;margin-top:8px;display:flex;align-items:center;gap:8px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          <span style="font-size:11px;color:var(--text-muted);flex:1;">Chunk from page ${chunkLocator.page||'?'}: <em>"${esc(searchText)}..."</em></span>
+        </div>`;
+      }
+    }else if(ext==='html'||ext==='htm'){
       html+=`<iframe src="/api/file-serve/${nodeData.id}" style="width:100%;height:calc(100vh - 300px);border:none;background:#fff;"></iframe>`;
 
     }else if(imageTypes.includes(ext)){
@@ -3759,7 +3788,7 @@ async function showFilePreview(nodeData){
         <img id="slide-img" style="max-width:100%;max-height:calc(100vh - 400px);border:1px solid var(--border);border-radius:4px;box-shadow:var(--shadow-md);">
         <div id="slide-thumbs" style="display:flex;gap:6px;overflow-x:auto;margin-top:10px;padding:4px 0;"></div>
       </div>`;
-      _pendingPreview={type:'slides',fileId:nodeData.id};
+      _pendingPreview={type:'slides',fileId:nodeData.id,startSlide:chunkLocator&&chunkLocator.slide?parseInt(chunkLocator.slide):null};
 
     }else if(spreadTypes.includes(ext)){
       // XLSX: Luckysheet interactive viewer
@@ -3771,12 +3800,26 @@ async function showFilePreview(nodeData){
       html+=`<iframe src="/api/file-convert/${nodeData.id}" style="width:100%;height:calc(100vh - 300px);border:none;background:#fff;"></iframe>`;
 
     }else{
-      // Text-based (MD/TXT/code) — render as one continuous document
+      // Text-based (MD/TXT/code) — render as one continuous document with chunk highlight
       if(d.chunks&&d.chunks.length>0){
-        const fullText=d.chunks.map(chunk=>typeof chunk==='string'?chunk:(chunk.text||'')).join('\n\n');
-        html+=`<div style="padding:16px 18px;background:var(--bg);border-radius:8px;border:1px solid var(--border);">
-          <div style="font-size:13px;color:var(--text);line-height:1.9;">${formatChunkContent(fullText)}</div>
-        </div>`;
+        const locatePreview=chunkLocator&&chunkLocator.preview?chunkLocator.preview.substring(0,80):'';
+        const locateHeading=chunkLocator&&chunkLocator.heading?chunkLocator.heading:'';
+        let chunkHtml='';
+        d.chunks.forEach((chunk,ci)=>{
+          const raw=typeof chunk==='string'?chunk:(chunk.text||'');
+          // Highlight this chunk if it matches the locator
+          const isTarget=locatePreview&&raw.includes(locatePreview.substring(0,40));
+          const headingMatch=locateHeading&&raw.includes(locateHeading);
+          const highlight=isTarget||headingMatch;
+          chunkHtml+=`<div id="chunk-${ci}" style="padding:12px 14px;margin-bottom:8px;border-radius:6px;border:1px solid ${highlight?'var(--accent)':'var(--border)'};background:${highlight?'var(--accent-light)':'var(--bg)'};${highlight?'scroll-margin-top:20px;':''}">
+            <div style="font-size:13px;color:var(--text);line-height:1.9;">${formatChunkContent(raw)}</div>
+          </div>`;
+        });
+        html+=`<div id="text-preview-container" style="max-height:calc(100vh - 320px);overflow-y:auto;">${chunkHtml}</div>`;
+        // Auto-scroll to highlighted chunk after render
+        if(locatePreview||locateHeading){
+          _pendingPreview={type:'scroll-to-chunk',locatePreview,locateHeading};
+        }
       }else{
         html+='<p style="color:var(--text-muted);font-size:12px;">No content preview available.</p>';
       }
@@ -3789,8 +3832,16 @@ async function showFilePreview(nodeData){
       const pp=_pendingPreview;
       _pendingPreview=null;
       setTimeout(()=>{
-        if(pp.type==='slides')loadSlides(pp.fileId);
+        if(pp.type==='slides')loadSlides(pp.fileId, pp.startSlide);
         else if(pp.type==='xlsx')loadSpreadsheet(pp.fileId);
+        else if(pp.type==='scroll-to-chunk'){
+          // Find and scroll to the highlighted chunk
+          const container=document.getElementById('text-preview-container');
+          if(container){
+            const highlighted=container.querySelector('[style*="var(--accent)"]');
+            if(highlighted)highlighted.scrollIntoView({behavior:'smooth',block:'center'});
+          }
+        }
       },100);
     }
   }catch(e){

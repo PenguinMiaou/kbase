@@ -629,6 +629,11 @@ def chat(store: KBaseStore, question: str, settings: dict = None,
                     "name": fname, "path": fpath,
                     "score": r.get("rrf_score") or r.get("score", 0),
                     "preview": r.get("text", "")[:400],
+                    "page": meta.get("page"),
+                    "slide": meta.get("slide"),
+                    "heading": meta.get("heading"),
+                    "sheet": meta.get("sheet"),
+                    "file_id": meta.get("file_id", ""),
                 })
 
     # Web search (for web, hybrid, research modes)

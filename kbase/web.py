@@ -1145,6 +1145,56 @@ del "%~f0" >nul 2>&1
         edges = [dict(r) for r in c.fetchall()]
         return {**info, "chunks": chunks, "edges": edges}
 
+    @app.get("/api/file-headings/{file_id}")
+    def api_file_headings(file_id: str):
+        """Get document structure (headings/pages/slides) for navigation sidebar."""
+        store = get_store()
+        headings = []
+        try:
+            results = store.collection.get(
+                where={"file_id": file_id},
+                include=["metadatas"],
+            )
+            for meta in results.get("metadatas", []):
+                is_parent = meta.get("is_parent")
+                if is_parent and str(is_parent).lower() in ("true", "1"):
+                    continue
+                idx = meta.get("chunk_index", 0)
+                heading = meta.get("heading", "")
+                page = meta.get("page", "")
+                slide = meta.get("slide", "")
+                sheet = meta.get("sheet", "")
+                label = heading or (f"Page {page}" if page else "") or (f"Slide {slide}" if slide else "") or (f"Sheet: {sheet}" if sheet else "")
+                if label:
+                    headings.append({"chunk_index": idx, "label": label, "page": page, "slide": slide, "heading": heading})
+        except Exception:
+            pass
+        # Deduplicate by label and sort
+        seen = set()
+        unique = []
+        for h in sorted(headings, key=lambda x: x["chunk_index"]):
+            if h["label"] not in seen:
+                seen.add(h["label"])
+                unique.append(h)
+        return {"headings": unique}
+
+    @app.get("/api/file-lookup")
+    def api_file_lookup(path: str = Query(...)):
+        """Resolve file_path to file_id for preview."""
+        store = get_store()
+        import hashlib
+        file_id = hashlib.md5(path.encode()).hexdigest()
+        c = store.conn.cursor()
+        c.execute("SELECT file_id, file_name, file_type, chunk_count FROM files WHERE file_id = ?", (file_id,))
+        row = c.fetchone()
+        if not row:
+            # Try by path directly
+            c.execute("SELECT file_id, file_name, file_type, chunk_count FROM files WHERE file_path = ?", (path,))
+            row = c.fetchone()
+        if not row:
+            raise HTTPException(404, "File not found in index")
+        return dict(row)
+
     @app.get("/api/file-serve/{file_id}")
     def api_file_serve(file_id: str):
         """Serve the original file for preview (PDF/HTML/image)."""

@@ -163,8 +163,9 @@ async fn run_online_setup(app: tauri::AppHandle) -> Result<(), String> {
         "step": "kbase", "status": "installing", "message": "Installing KBase + Python 3.12..."
     }));
 
+    // Install from GitHub (not on PyPI yet)
     let mut child = Command::new(&uv)
-        .args(["tool", "install", "kbase-app", "--python", "3.12", "--force"])
+        .args(["tool", "install", "kbase-app", "--from", "git+https://github.com/PenguinMiaou/kbase.git", "--python", "3.12", "--force"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
