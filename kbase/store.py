@@ -720,18 +720,23 @@ class KBaseStore:
         if not safe_query:
             return []
 
-        # Use OR for better recall with Chinese
+        # Multiple keywords: use AND for precision (user expects narrowing)
+        # Single keyword: add bigrams with OR for recall
         terms = [t for t in safe_query.split() if t and len(t) >= 1]
-        # Also add character bigrams for Chinese (catches partial matches)
-        bigrams = []
-        for t in terms:
-            if len(t) >= 4 and any('\u4e00' <= c <= '\u9fff' for c in t):
-                for i in range(len(t) - 1):
-                    bg = t[i:i+2]
-                    if any('\u4e00' <= c <= '\u9fff' for c in bg):
-                        bigrams.append(bg)
-        all_terms = terms + bigrams[:10]  # Cap bigrams to avoid too many
-        fts_query = " OR ".join(f'"{t}"' for t in all_terms if t)
+        if len(terms) > 1:
+            # Multi-keyword: AND between terms (progressive refinement)
+            fts_query = " AND ".join(f'"{t}"' for t in terms)
+        else:
+            # Single keyword: add character bigrams for Chinese recall
+            bigrams = []
+            for t in terms:
+                if len(t) >= 4 and any('\u4e00' <= c <= '\u9fff' for c in t):
+                    for i in range(len(t) - 1):
+                        bg = t[i:i+2]
+                        if any('\u4e00' <= c <= '\u9fff' for c in bg):
+                            bigrams.append(bg)
+            all_terms = terms + bigrams[:10]
+            fts_query = " OR ".join(f'"{t}"' for t in all_terms if t)
 
         c = self.conn.cursor()
         try:
@@ -773,17 +778,18 @@ class KBaseStore:
             terms = [t.strip() for t in query.split() if len(t.strip()) >= 2]
             if not terms:
                 terms = [query.strip()]
-            for term in terms:
-                c.execute("""
-                    SELECT file_path, file_name FROM files
-                    WHERE file_name LIKE '%' || ? || '%'
-                    LIMIT ?
-                """, (term, top_k))
-                for row in c.fetchall():
-                    fpath = row["file_path"]
-                    if fpath in seen_files or self._is_path_disabled(fpath):
-                        continue
-                    seen_files.add(fpath)
+            # Build AND query: all terms must appear in filename
+            where_clauses = " AND ".join(["file_name LIKE '%' || ? || '%'"] * len(terms))
+            c.execute(f"""
+                SELECT file_path, file_name FROM files
+                WHERE {where_clauses}
+                LIMIT ?
+            """, (*terms, top_k))
+            for row in c.fetchall():
+                fpath = row["file_path"]
+                if fpath in seen_files or self._is_path_disabled(fpath):
+                    continue
+                seen_files.add(fpath)
                     # Get first chunk of this file
                     c2 = self.conn.cursor()
                     c2.execute("SELECT chunk_id, file_id, text FROM fts_chunks WHERE file_path=? LIMIT 1", (fpath,))
