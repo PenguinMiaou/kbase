@@ -80,6 +80,23 @@ def _auto_save_research(report: str, question: str, workspace: str, settings: di
         save_settings(workspace, settings)
 
 
+def _find_soffice() -> str | None:
+    """Find LibreOffice soffice binary, checking common install paths."""
+    import shutil
+    path = shutil.which("soffice")
+    if path:
+        return path
+    for candidate in [
+        "/opt/homebrew/bin/soffice",
+        "/usr/local/bin/soffice",
+        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+        r"C:\Program Files\LibreOffice\program\soffice.exe",
+    ]:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
 def _validate_file_path(file_path: str, store=None) -> str:
     """Security: validate file path is within allowed directories.
 
@@ -1245,12 +1262,13 @@ del "%~f0" >nul 2>&1
         # Check if already converted
         existing = sorted(globmod.glob(os.path.join(slides_dir, "*.png")))
         if not existing:
-            if not shutil.which("soffice"):
+            soffice = _find_soffice()
+            if not soffice:
                 raise HTTPException(400, "LibreOffice not installed")
             # Convert PPTX -> PDF first, then PDF -> PNG pages
             pdf_path = os.path.join(slides_dir, "slides.pdf")
             subprocess.run(
-                ["soffice", "--headless", "--convert-to", "pdf", "--outdir", slides_dir, file_path],
+                [soffice, "--headless", "--convert-to", "pdf", "--outdir", slides_dir, file_path],
                 capture_output=True, timeout=60,
             )
             # Find the generated PDF
@@ -1343,7 +1361,8 @@ del "%~f0" >nul 2>&1
             raise HTTPException(404, "File no longer exists")
 
         # Try LibreOffice first — renders PPTX/DOCX faithfully as PDF
-        if shutil.which("soffice"):
+        soffice = _find_soffice()
+        if soffice:
             tmp_dir = os.path.join(tempfile.gettempdir(), "kbase-convert")
             os.makedirs(tmp_dir, exist_ok=True)
             base_name = os.path.splitext(os.path.basename(file_path))[0]
@@ -1351,7 +1370,7 @@ del "%~f0" >nul 2>&1
             if not os.path.exists(pdf_out):
                 try:
                     subprocess.run(
-                        ["soffice", "--headless", "--convert-to", "pdf", "--outdir", tmp_dir, file_path],
+                        [soffice, "--headless", "--convert-to", "pdf", "--outdir", tmp_dir, file_path],
                         capture_output=True, timeout=30,
                     )
                 except Exception:
