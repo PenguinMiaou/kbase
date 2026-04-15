@@ -344,7 +344,8 @@ async fn start_and_navigate(app: &tauri::AppHandle) {
             *state.0.lock().unwrap() = Some(child);
         }
     }
-    if wait_for_server(30).await {
+    // First launch may need to download embedding model (~90MB), allow 120s
+    if wait_for_server(120).await {
         navigate_to_server(app).await;
     }
 }

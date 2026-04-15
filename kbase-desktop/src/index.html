@@ -179,14 +179,17 @@
     }
     function retry() {
       pollAttempts++;
-      if (pollAttempts > 60) {
+      if (pollAttempts > 240) {
         document.getElementById('spinner').style.display = 'none';
         document.getElementById('status').textContent = 'Server did not start.';
         document.getElementById('error').classList.add('active');
         return;
       }
       const dots = '.'.repeat((pollAttempts % 3) + 1);
-      document.getElementById('status').textContent = 'Starting server' + dots;
+      let msg = 'Starting server' + dots;
+      if (pollAttempts > 10) msg = '正在下载 AI 模型（首次约 1-2 分钟）' + dots;
+      if (pollAttempts > 60) msg = '模型下载中，请稍候' + dots;
+      document.getElementById('status').textContent = msg;
       setTimeout(pollServer, 500);
     }
 
