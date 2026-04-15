@@ -6,9 +6,11 @@
 <title>KBase</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* Light mode (default) */
   body {
-    background: #0f0f23;
-    color: #e2e8f0;
+    background: #f8fafc;
+    color: #1e293b;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     display: flex;
     align-items: center;
@@ -24,13 +26,14 @@
     display: flex; align-items: center; justify-content: center;
     margin: 0 auto 24px;
     font-size: 40px; font-weight: 700; color: #fff;
+    box-shadow: 0 8px 24px rgba(99, 102, 241, 0.25);
   }
   h1 { font-size: 28px; font-weight: 600; margin-bottom: 8px; }
-  .subtitle { color: #94a3b8; font-size: 14px; margin-bottom: 32px; }
+  .subtitle { color: #64748b; font-size: 14px; margin-bottom: 32px; }
   .spinner {
     width: 32px; height: 32px;
-    border: 3px solid #1e293b;
-    border-top-color: #818cf8;
+    border: 3px solid #e2e8f0;
+    border-top-color: #6366f1;
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
     margin: 0 auto 16px;
@@ -46,30 +49,62 @@
     transition: background 0.2s;
   }
   .setup-btn:hover { background: #4f46e5; }
-  .setup-btn:disabled { background: #334155; cursor: default; }
+  .setup-btn:disabled { background: #94a3b8; cursor: default; }
   .progress-bar {
-    width: 100%; height: 4px; background: #1e293b; border-radius: 2px;
+    width: 100%; height: 6px; background: #e2e8f0; border-radius: 3px;
     margin: 16px 0 12px; overflow: hidden; display: none;
   }
   .progress-bar.active { display: block; }
   .progress-fill {
     height: 100%; background: linear-gradient(90deg, #6366f1, #818cf8);
-    border-radius: 2px; width: 0%; transition: width 0.3s;
+    border-radius: 3px; width: 0%; transition: width 0.3s;
   }
   .setup-log {
     color: #64748b; font-size: 12px; font-family: 'SF Mono', monospace;
     max-height: 80px; overflow-y: auto; text-align: left;
-    margin-top: 8px; padding: 8px; background: #1a1a2e; border-radius: 6px;
+    margin-top: 8px; padding: 8px; background: #f1f5f9; border-radius: 6px;
+    border: 1px solid #e2e8f0;
     display: none;
   }
   .setup-log.active { display: block; }
 
-  .error { color: #f87171; display: none; margin-top: 16px; font-size: 13px; }
+  /* Server startup progress bar */
+  .startup-progress {
+    width: 260px; height: 6px; background: #e2e8f0; border-radius: 3px;
+    margin: 16px auto 12px; overflow: hidden; display: none;
+  }
+  .startup-progress.active { display: block; }
+  .startup-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #6366f1, #818cf8, #6366f1);
+    background-size: 200% 100%;
+    border-radius: 3px;
+    width: 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+  }
+
+  .error { color: #dc2626; display: none; margin-top: 16px; font-size: 13px; }
   .error.active { display: block; }
-  .error a { color: #818cf8; }
+  .error code { background: #fef2f2; padding: 4px 8px; border-radius: 4px; font-size: 11px; }
+
+  /* Dark mode */
+  @media (prefers-color-scheme: dark) {
+    body { background: #0f0f23; color: #e2e8f0; }
+    .subtitle { color: #94a3b8; }
+    .spinner { border-color: #1e293b; border-top-color: #818cf8; }
+    .status { color: #94a3b8; }
+    .setup-btn:disabled { background: #334155; }
+    .progress-bar { background: #1e293b; }
+    .setup-log { background: #1a1a2e; color: #94a3b8; border-color: #1e293b; }
+    .startup-progress { background: #1e293b; }
+    .error { color: #f87171; }
+    .error code { background: #1a1a2e; }
+    .logo { box-shadow: 0 8px 24px rgba(99, 102, 241, 0.15); }
+  }
 
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; } }
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 </style>
 </head>
 <body>
@@ -78,12 +113,13 @@
     <h1>KBase</h1>
     <p class="subtitle">Local Knowledge Base</p>
     <div class="spinner" id="spinner"></div>
+    <div class="startup-progress" id="startup-progress"><div class="startup-progress-fill"></div></div>
     <p class="status" id="status">Checking environment...</p>
 
     <div id="setup-panel">
-      <p style="color:#94a3b8; font-size:13px; margin-bottom:16px;">
+      <p style="color:#64748b; font-size:13px; margin-bottom:16px;">
         首次使用需要安装 KBase 运行环境（约 2 分钟）<br>
-        <span style="color:#64748b; font-size:11px;">First launch — setting up KBase runtime (~2 min)</span>
+        <span style="font-size:11px;">First launch — setting up KBase runtime (~2 min)</span>
       </p>
       <button class="setup-btn" id="setup-btn" onclick="startSetup()">一键安装 / Install</button>
       <div class="progress-bar" id="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
@@ -115,7 +151,8 @@
       // Check if Python/kbase is available
       const ready = await invoke('check_python_ready');
       if (ready) {
-        document.getElementById('status').textContent = 'Starting server...';
+        document.getElementById('status').textContent = '正在启动服务 / Starting server...';
+        document.getElementById('startup-progress').classList.add('active');
         pollServer();
       } else {
         // Show setup UI
@@ -132,7 +169,7 @@
       const log = document.getElementById('setup-log');
 
       btn.disabled = true;
-      btn.textContent = 'Installing...';
+      btn.textContent = '安装中 / Installing...';
       bar.classList.add('active');
       log.classList.add('active');
       fill.style.width = '10%';
@@ -153,15 +190,16 @@
       try {
         await invoke('run_setup');
         fill.style.width = '100%';
-        btn.textContent = 'Starting server...';
+        btn.textContent = '正在启动 / Starting...';
 
         // Now start polling for server
         document.getElementById('spinner').style.display = 'block';
-        document.getElementById('status').textContent = 'Starting server...';
+        document.getElementById('status').textContent = '正在启动服务 / Starting server...';
+        document.getElementById('startup-progress').classList.add('active');
         document.getElementById('setup-panel').classList.remove('active');
         pollServer();
       } catch (e) {
-        btn.textContent = 'Retry';
+        btn.textContent = '重试 / Retry';
         btn.disabled = false;
         document.getElementById('error').classList.add('active');
         const line = document.createElement('div');
@@ -181,7 +219,8 @@
       pollAttempts++;
       if (pollAttempts > 240) {
         document.getElementById('spinner').style.display = 'none';
-        document.getElementById('status').textContent = 'Server did not start.';
+        document.getElementById('startup-progress').classList.remove('active');
+        document.getElementById('status').textContent = '服务启动失败 / Server did not start.';
         document.getElementById('error').classList.add('active');
         return;
       }
