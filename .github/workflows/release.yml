@@ -9,6 +9,23 @@ permissions:
   contents: write
 
 jobs:
+  # ── Lint & Test ────────────────────────────────────────────────
+  quality-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          pip install -e ".[dev]"
+          pip install jieba
+      - name: Lint
+        run: ruff check kbase/ tests/
+      - name: Test
+        run: pytest tests/ -v --tb=short
+
   # ── Tauri Lite (online installer, ~5MB) ─────────────────────────
   build-tauri-lite:
     strategy:
@@ -127,7 +144,7 @@ jobs:
 
   # ── Release ─────────────────────────────────────────────────────
   release:
-    needs: [build-tauri-lite, build-tauri-fat, build-pypi]
+    needs: [quality-gate, build-tauri-lite, build-tauri-fat, build-pypi]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

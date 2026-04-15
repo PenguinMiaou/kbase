@@ -1,0 +1,22 @@
+{
+  "hooks": {
+    "PreCommit": [
+      {
+        "type": "command",
+        "command": "cd /Users/briantiong/Desktop/kbase && ruff check kbase/ tests/ --quiet"
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(make lint)",
+      "Bash(make test)",
+      "Bash(make check)",
+      "Bash(ruff *)",
+      "Bash(pytest *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)"
+    ]
+  }
+}
