@@ -99,16 +99,15 @@
 
   <!-- === MAIN CONTENT === -->
   <div class="main-content" id="main-content">
-    <!-- Session title bar (centered top) -->
-    <div class="session-title-bar" id="session-title-bar" style="display:none;">
-      <span class="session-title" id="session-title" onclick="editSessionTitle()" title="Click to rename"></span>
-    </div>
-    <!-- Stats bar -->
+    <!-- Stats bar + session title inline -->
     <div class="stats-bar">
       <div class="stat-item"><strong id="s-files">0</strong> Files</div>
       <div class="stat-item"><strong id="s-chunks">0</strong> Chunks</div>
       <div class="stat-item"><strong id="s-tables">0</strong> Tables</div>
       <div class="stat-item" style="cursor:pointer;" onclick="showErrors()" title="Click to view errors"><strong id="s-errors" style="color:var(--red);">0</strong> Errors</div>
+      <div class="session-title-bar" id="session-title-bar" style="display:none;">
+        <span class="session-title" id="session-title" onclick="editSessionTitle()" title="Click to rename"></span>
+      </div>
     </div>
 
     <!-- Chat panel -->
