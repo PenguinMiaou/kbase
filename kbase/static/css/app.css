@@ -166,11 +166,8 @@ body {
 
 /* Session title bar */
 .session-title-bar {
-  margin-left: auto;
-  padding: 0 8px;
-  flex-shrink: 1;
-  min-width: 0;
-  overflow: hidden;
+  text-align: center;
+  padding: 6px 24px 2px;
 }
 .session-title {
   font-size: 15px;
