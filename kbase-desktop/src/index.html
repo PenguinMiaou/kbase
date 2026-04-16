@@ -217,7 +217,7 @@
     }
     function retry() {
       pollAttempts++;
-      if (pollAttempts > 240) {
+      if (pollAttempts > 600) {
         document.getElementById('spinner').style.display = 'none';
         document.getElementById('startup-progress').classList.remove('active');
         document.getElementById('status').textContent = '服务启动失败 / Server did not start.';
