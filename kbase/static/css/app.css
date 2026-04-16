@@ -170,7 +170,7 @@ body {
   text-align: center;
   background: transparent;
   position: absolute;
-  top: 0;
+  top: 42px;
   left: 0;
   right: 0;
   z-index: 5;
