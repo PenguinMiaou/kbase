@@ -238,7 +238,11 @@ async fn quit_app(app: tauri::AppHandle) {
 
 #[tauri::command]
 async fn run_setup(app: tauri::AppHandle) -> Result<String, String> {
-    run_online_setup(app).await?;
+    run_online_setup(app.clone()).await?;
+    // Start server after successful install
+    tauri::async_runtime::spawn(async move {
+        start_and_navigate(&app).await;
+    });
     Ok("ok".to_string())
 }
 
