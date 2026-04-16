@@ -116,10 +116,15 @@ def _generate_preview_cache(file_path: str, file_type: str, cache_path: Path) ->
     if not soffice:
         return False
     try:
+        import tempfile as _tmpmod
         tmp_dir = cache_path.parent  # output to same dir
+        # Use unique UserInstallation to avoid Dock icon bounce and lock conflicts
+        user_install = f"file://{_tmpmod.mkdtemp(prefix='kbase-lo-')}"
         result = subprocess.run(
-            [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(tmp_dir), file_path],
-            capture_output=True, timeout=60,
+            [soffice, "--headless", "--norestore", "--invisible",
+             f"-env:UserInstallation={user_install}",
+             "--convert-to", "pdf", "--outdir", str(tmp_dir), file_path],
+            capture_output=True, timeout=120,
         )
         # LibreOffice outputs as original_name.pdf, rename to file_id.pdf
         base_name = os.path.splitext(os.path.basename(file_path))[0]
@@ -131,12 +136,18 @@ def _generate_preview_cache(file_path: str, file_type: str, cache_path: Path) ->
         return False
 
 
-def _background_generate_previews(workspace: str):
-    """Scan all files and generate missing preview caches. Run in background thread."""
-    import threading
+def _background_generate_previews(workspace: str, delay: int = 60):
+    """Scan all files and generate missing preview caches. Run in background thread.
+
+    Args:
+        delay: seconds to wait before starting (0 for post-ingest, 60 for startup)
+    """
+    import threading, time as _time
 
     def _worker():
         try:
+            if delay > 0:
+                _time.sleep(delay)  # Don't hammer CPU right at startup
             from kbase.config import get_db_path
             import sqlite3
             db_path = get_db_path(workspace)
@@ -155,6 +166,7 @@ def _background_generate_previews(workspace: str):
                 cache_path = _get_preview_cache_path(workspace, row["file_id"])
                 if not cache_path.exists() and os.path.isfile(row["file_path"]):
                     _generate_preview_cache(row["file_path"], row["file_type"], cache_path)
+                    _time.sleep(2)  # Throttle: one file every 2s to avoid CPU spike
         except Exception:
             pass
 
@@ -424,8 +436,8 @@ def create_app(workspace: str = "default") -> FastAPI:
                 }
                 save_settings(workspace, settings_data)
                 q.put(json.dumps({"done": True, **stats}))
-                # After ingest: generate preview caches in background
-                _background_generate_previews(workspace)
+                # After ingest: generate preview caches in background (no delay)
+                _background_generate_previews(workspace, delay=5)
             except Exception as e:
                 q.put(json.dumps({"done": True, "error": str(e)}))
             finally:
