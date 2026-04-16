@@ -204,8 +204,8 @@ async fn start_python_server() -> Option<Child> {
 
     let child = Command::new(&python)
         .args(["-m", "kbase.cli", "web", "--port", &PORT.to_string()])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .kill_on_drop(true)
         .spawn()
         .ok()?;
