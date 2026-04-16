@@ -97,6 +97,71 @@ def _find_soffice() -> str | None:
     return None
 
 
+def _get_preview_cache_path(workspace: str, file_id: str) -> Path:
+    """Get path for cached PDF preview."""
+    from kbase.config import get_workspace_dir
+    cache_dir = get_workspace_dir(workspace) / "preview_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir / f"{file_id}.pdf"
+
+
+def _generate_preview_cache(file_path: str, file_type: str, cache_path: Path) -> bool:
+    """Convert file to PDF using LibreOffice. Returns True on success."""
+    ext = file_type.lower()
+    if ext not in ('.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls'):
+        return False
+    if cache_path.exists():
+        return True
+    soffice = _find_soffice()
+    if not soffice:
+        return False
+    try:
+        tmp_dir = cache_path.parent  # output to same dir
+        result = subprocess.run(
+            [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(tmp_dir), file_path],
+            capture_output=True, timeout=60,
+        )
+        # LibreOffice outputs as original_name.pdf, rename to file_id.pdf
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        generated = tmp_dir / f"{base_name}.pdf"
+        if generated.exists() and generated != cache_path:
+            generated.rename(cache_path)
+        return cache_path.exists()
+    except Exception:
+        return False
+
+
+def _background_generate_previews(workspace: str):
+    """Scan all files and generate missing preview caches. Run in background thread."""
+    import threading
+
+    def _worker():
+        try:
+            from kbase.config import get_db_path
+            import sqlite3
+            db_path = get_db_path(workspace)
+            if not db_path.exists():
+                return
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            c.execute(
+                "SELECT file_id, file_path, file_type FROM files "
+                "WHERE file_type IN ('.pptx','.ppt','.docx','.doc','.xlsx','.xls')"
+            )
+            rows = c.fetchall()
+            conn.close()
+            for row in rows:
+                cache_path = _get_preview_cache_path(workspace, row["file_id"])
+                if not cache_path.exists() and os.path.isfile(row["file_path"]):
+                    _generate_preview_cache(row["file_path"], row["file_type"], cache_path)
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+
+
 def _validate_file_path(file_path: str, store=None) -> str:
     """Security: validate file path is within allowed directories.
 
@@ -359,6 +424,8 @@ def create_app(workspace: str = "default") -> FastAPI:
                 }
                 save_settings(workspace, settings_data)
                 q.put(json.dumps({"done": True, **stats}))
+                # After ingest: generate preview caches in background
+                _background_generate_previews(workspace)
             except Exception as e:
                 q.put(json.dumps({"done": True, "error": str(e)}))
             finally:
@@ -1234,6 +1301,17 @@ del "%~f0" >nul 2>&1
             '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.wav': 'audio/wav',
         }
         ext = (row["file_type"] or "").lower()
+
+        # For document types, serve cached PDF preview if available
+        if ext in ('.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls'):
+            cache_path = _get_preview_cache_path(workspace, file_id)
+            if cache_path.exists():
+                from starlette.responses import Response
+                with open(cache_path, 'rb') as f:
+                    content = f.read()
+                return Response(content=content, media_type="application/pdf",
+                                headers={"Content-Disposition": "inline"})
+
         media_type = mime_map.get(ext, 'application/octet-stream')
         from starlette.responses import Response
         with open(file_path, 'rb') as f:
@@ -1262,19 +1340,25 @@ del "%~f0" >nul 2>&1
         # Check if already converted
         existing = sorted(globmod.glob(os.path.join(slides_dir, "*.png")))
         if not existing:
-            soffice = _find_soffice()
-            if not soffice:
-                raise HTTPException(400, "LibreOffice not installed")
-            # Convert PPTX -> PDF first, then PDF -> PNG pages
-            pdf_path = os.path.join(slides_dir, "slides.pdf")
-            subprocess.run(
-                [soffice, "--headless", "--convert-to", "pdf", "--outdir", slides_dir, file_path],
-                capture_output=True, timeout=60,
-            )
-            # Find the generated PDF
-            pdfs = globmod.glob(os.path.join(slides_dir, "*.pdf"))
-            if pdfs:
-                pdf_path = pdfs[0]
+            # Use cached PDF if available
+            cache_path = _get_preview_cache_path(workspace, file_id)
+            pdf_path = None
+            if cache_path.exists():
+                pdf_path = str(cache_path)
+            else:
+                soffice = _find_soffice()
+                if not soffice:
+                    raise HTTPException(400, "LibreOffice not installed")
+                # Convert PPTX -> PDF first, then PDF -> PNG pages
+                subprocess.run(
+                    [soffice, "--headless", "--convert-to", "pdf", "--outdir", slides_dir, file_path],
+                    capture_output=True, timeout=60,
+                )
+                # Find the generated PDF
+                pdfs = globmod.glob(os.path.join(slides_dir, "*.pdf"))
+                if pdfs:
+                    pdf_path = pdfs[0]
+            if pdf_path:
                 # PDF -> PNG per page using PyMuPDF
                 try:
                     import fitz
@@ -1359,6 +1443,16 @@ del "%~f0" >nul 2>&1
         ext = (row["file_type"] or "").lower()
         if not os.path.isfile(file_path):
             raise HTTPException(404, "File no longer exists")
+
+        # Check preview cache first
+        if ext in ('.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls'):
+            cache_path = _get_preview_cache_path(workspace, file_id)
+            if cache_path.exists():
+                with open(cache_path, 'rb') as f:
+                    content = f.read()
+                from starlette.responses import Response
+                return Response(content=content, media_type="application/pdf",
+                                headers={"Content-Disposition": "inline"})
 
         # Try LibreOffice first — renders PPTX/DOCX faithfully as PDF
         soffice = _find_soffice()
@@ -2243,6 +2337,9 @@ print(path)
     def index_v1():
         """Legacy UI"""
         return FRONTEND_HTML
+
+    # Background: generate preview caches for files that need it
+    _background_generate_previews(workspace)
 
     return app
 
