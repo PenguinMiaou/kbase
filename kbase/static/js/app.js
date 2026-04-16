@@ -1064,9 +1064,10 @@ async function loadConvList(){
       });
     });
     el.innerHTML=html;
-    // Update session title from server if we have it
+    // Update session title from server (hide if new/untitled conversation)
     const cur=convs.find(c=>c.id===convId);
     if(cur&&cur.title){convTitle=cur.title;updateSessionTitle(cur.title);}
+    else{convTitle='';updateSessionTitle('');}
   }catch(e){}
 }
 
