@@ -1376,8 +1376,8 @@ async function checkIngestStatus(){
             const ct=document.getElementById('ingest-count');if(ct)ct.textContent=pc+'%';
             const fn=document.getElementById('ingest-file');if(fn)fn.textContent=pp.name||'';
             const pbtn=document.getElementById('ingest-pause-btn');if(pbtn)pbtn.textContent=paused?'Resume':'Pause';
-            // Refresh stats periodically
-            if(pc%10===0)loadStats();
+            // Refresh stats on every poll so user sees files/chunks increase in real-time
+            loadStats();
           }catch(_){clearInterval(poll);}
         },2000);
       }
