@@ -97,6 +97,28 @@ def _find_soffice() -> str | None:
     return None
 
 
+def _ensure_soffice_no_dock():
+    """Patch LibreOffice Info.plist to suppress Dock icon (LSUIElement=true).
+    Only needed once on macOS. Safe to call multiple times."""
+    import platform
+    if platform.system() != "Darwin":
+        return
+    plist_path = "/Applications/LibreOffice.app/Contents/Info.plist"
+    if not os.path.isfile(plist_path):
+        return
+    try:
+        import plistlib
+        with open(plist_path, "rb") as f:
+            plist = plistlib.load(f)
+        if plist.get("LSUIElement") is True:
+            return  # Already patched
+        plist["LSUIElement"] = True
+        with open(plist_path, "wb") as f:
+            plistlib.dump(plist, f)
+    except (PermissionError, Exception):
+        pass  # No write permission — Dock icon will still show
+
+
 def _get_preview_cache_path(workspace: str, file_id: str) -> Path:
     """Get path for cached PDF preview."""
     from kbase.config import get_workspace_dir
@@ -117,14 +139,19 @@ def _generate_preview_cache(file_path: str, file_type: str, cache_path: Path) ->
         return False
     try:
         import tempfile as _tmpmod
-        tmp_dir = cache_path.parent  # output to same dir
-        # Use unique UserInstallation to avoid Dock icon bounce and lock conflicts
-        user_install = f"file://{_tmpmod.mkdtemp(prefix='kbase-lo-')}"
+        tmp_dir = cache_path.parent
+        user_install = _tmpmod.mkdtemp(prefix='kbase-lo-')
+        # Use shell wrapper to suppress macOS Dock icon bouncing
+        # The trick: pipe through sh so soffice doesn't register as GUI app
+        cmd = (
+            f'"{soffice}" --headless --norestore --invisible '
+            f'-env:UserInstallation=file://{user_install} '
+            f'--convert-to pdf --outdir "{tmp_dir}" "{file_path}"'
+        )
         result = subprocess.run(
-            [soffice, "--headless", "--norestore", "--invisible",
-             f"-env:UserInstallation={user_install}",
-             "--convert-to", "pdf", "--outdir", str(tmp_dir), file_path],
+            ["sh", "-c", cmd],
             capture_output=True, timeout=120,
+            start_new_session=True,
         )
         # LibreOffice outputs as original_name.pdf, rename to file_id.pdf
         base_name = os.path.splitext(os.path.basename(file_path))[0]
@@ -136,77 +163,9 @@ def _generate_preview_cache(file_path: str, file_type: str, cache_path: Path) ->
         return False
 
 
-# Global preview cache queue + consumer thread (singleton)
-import queue as _queue_mod
-_preview_queue = _queue_mod.Queue()
-_preview_consumer_started = False
 
-
-def _start_preview_consumer(workspace: str):
-    """Start the singleton consumer thread that processes preview cache jobs."""
-    global _preview_consumer_started
-    if _preview_consumer_started:
-        return
-    _preview_consumer_started = True
-    import threading, time as _time
-
-    def _consumer():
-        while True:
-            try:
-                job = _preview_queue.get(timeout=30)
-                if job is None:
-                    continue
-                file_path, file_type, file_id = job
-                cache_path = _get_preview_cache_path(workspace, file_id)
-                if not cache_path.exists() and os.path.isfile(file_path):
-                    _generate_preview_cache(file_path, file_type, cache_path)
-                _preview_queue.task_done()
-                _time.sleep(2)  # Throttle: 2s between conversions
-            except _queue_mod.Empty:
-                continue
-            except Exception:
-                continue
-
-    t = threading.Thread(target=_consumer, daemon=True)
-    t.start()
-
-
-def _enqueue_preview(file_path: str, file_type: str, file_id: str):
-    """Add a file to the preview cache queue (non-blocking)."""
-    ext = file_type.lower()
-    if ext in ('.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls'):
-        _preview_queue.put((file_path, file_type, file_id))
-
-
-def _background_generate_previews(workspace: str, delay: int = 60):
-    """Scan DB for files missing preview cache and enqueue them."""
-    import threading, time as _time
-
-    def _worker():
-        try:
-            if delay > 0:
-                _time.sleep(delay)
-            from kbase.config import get_db_path
-            import sqlite3
-            db_path = get_db_path(workspace)
-            if not db_path.exists():
-                return
-            conn = sqlite3.connect(str(db_path))
-            conn.row_factory = sqlite3.Row
-            c = conn.cursor()
-            c.execute(
-                "SELECT file_id, file_path, file_type FROM files "
-                "WHERE file_type IN ('.pptx','.ppt','.docx','.doc','.xlsx','.xls')"
-            )
-            for row in c.fetchall():
-                cache_path = _get_preview_cache_path(workspace, row["file_id"])
-                if not cache_path.exists():
-                    _enqueue_preview(row["file_path"], row["file_type"], row["file_id"])
-            conn.close()
-        except Exception:
-            pass
-
-    threading.Thread(target=_worker, daemon=True).start()
+# No background preview generation — LibreOffice Dock icon can't be suppressed on macOS.
+# Preview cache is populated on-demand: first click converts + caches, subsequent clicks are instant.
 
 
 def _validate_file_path(file_path: str, store=None) -> str:
@@ -457,24 +416,8 @@ def create_app(workspace: str = "default") -> FastAPI:
                     dirs[directory] = {"enabled": True, "last_sync": 0, "file_count": 0, "status": "ingesting"}
                 save_settings(workspace, settings_data)
 
-                _prev_file = [None]  # track previous file for cache queueing
                 def cb(current, total, name, status):
                     q.put(json.dumps({"current": current, "total": total, "name": name, "status": status}))
-                    # Queue preview cache for the PREVIOUS file (it's now fully ingested)
-                    if _prev_file[0] and _prev_file[0] != name:
-                        prev = _prev_file[0]
-                        ext = os.path.splitext(prev)[1].lower()
-                        if ext in ('.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls'):
-                            # Look up file_id from DB
-                            try:
-                                c2 = store.conn.cursor()
-                                c2.execute("SELECT file_id, file_path FROM files WHERE file_name=? LIMIT 1", (prev,))
-                                row2 = c2.fetchone()
-                                if row2:
-                                    _enqueue_preview(row2["file_path"], ext, row2["file_id"])
-                            except Exception:
-                                pass
-                    _prev_file[0] = name
                 stats = ingest_directory(store, directory, force=force, progress_callback=cb)
                 # Update directory status on completion
                 settings_data = load_settings(workspace)
@@ -2401,6 +2344,8 @@ print(path)
         """Legacy UI"""
         return FRONTEND_HTML
 
+    # Suppress LibreOffice Dock icon on macOS
+    _ensure_soffice_no_dock()
     # Start preview cache consumer thread + scan for missing caches after 60s
     _start_preview_consumer(workspace)
     _background_generate_previews(workspace)
