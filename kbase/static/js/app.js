@@ -1092,16 +1092,30 @@ function updateSessionTitle(title){
   el.textContent=title;
 }
 
-async function editSessionTitle(){
-  const cur=convTitle||'';
-  const newTitle=prompt('Rename session / 重命名对话:',cur);
-  if(newTitle===null||newTitle.trim()===cur)return;
-  const title=newTitle.trim();
-  if(!title)return;
-  convTitle=title;convTitleManual=true;
-  updateSessionTitle(title);
-  await api(`/api/conversations/${convId}/title`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({title})});
-  loadConvList();
+function editSessionTitle(){
+  const el=document.getElementById('session-title');
+  if(!el||el.querySelector('input'))return;
+  const cur=convTitle||el.textContent||'';
+  const input=document.createElement('input');
+  input.type='text';
+  input.value=cur;
+  input.style.cssText='font-size:15px;font-weight:600;border:1px solid var(--accent);border-radius:6px;padding:4px 12px;background:var(--card);color:var(--text);outline:none;text-align:center;width:300px;max-width:80vw;';
+  el.textContent='';
+  el.appendChild(input);
+  input.focus();
+  input.select();
+  const save=async()=>{
+    const title=input.value.trim()||cur;
+    convTitle=title;convTitleManual=true;
+    updateSessionTitle(title);
+    await api(`/api/conversations/${convId}/title`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({title})});
+    loadConvList();
+  };
+  input.addEventListener('blur',save);
+  input.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();input.blur();}
+    if(e.key==='Escape'){input.value=cur;input.blur();}
+  });
 }
 
 async function autoGenerateTitle(){
