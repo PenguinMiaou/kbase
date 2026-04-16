@@ -1169,9 +1169,9 @@ function renameConvInline(el,cid){
   const save=async()=>{
     const newTitle=input.value.trim()||oldText;
     try{
-      await api('/api/conversations/'+cid+'/title',{method:'POST',
+      await api('/api/conversations/'+cid+'/title',{method:'PUT',
         headers:{'Content-Type':'application/json'},body:JSON.stringify({title:newTitle})});
-      if(cid===convId)updateSessionTitle(newTitle);
+      if(cid===convId){convTitle=newTitle;convTitleManual=true;updateSessionTitle(newTitle);}
     }catch(e){}
     loadConvList();
   };
