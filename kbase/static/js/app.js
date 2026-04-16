@@ -1054,7 +1054,7 @@ async function loadConvList(){
         const label=c.title||c.preview||'...';
         const ts=parseInt((c.id||'').replace('conv-',''))||0;
         const time=ts?new Date(ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'';
-        html+=`<div class="conv-item ${c.id===convId?'active':''}" onclick="switchConv('${c.id}')" ondblclick="event.stopPropagation();renameConvInline(this,'${c.id}')">
+        html+=`<div class="conv-item ${c.id===convId?'active':''}" onclick="if(!this._dblWait){this._dblWait=setTimeout(()=>{this._dblWait=null;switchConv('${c.id}');},250);}" ondblclick="clearTimeout(this._dblWait);this._dblWait=null;event.stopPropagation();renameConvInline(this,'${c.id}')">
           <span class="conv-label" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(label)}</span>
           <span class="conv-time">${time}</span>
           <span class="conv-delete" onclick="event.stopPropagation();deleteConv('${c.id}')">
