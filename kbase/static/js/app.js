@@ -1404,14 +1404,21 @@ async function loadIngestDirs(){
           <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(dir.path)}">${esc(dir.path)}</div>
           <div style="font-size:11px;color:var(--text-muted);">${dir.file_count} files | Last sync: ${dir.ago} | ${dir.enabled?'Active':'Disabled'}</div>
         </div>
-        <button onclick="resyncDir('${dir.path.replace(/'/g,"\\'")}')" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text-dim);cursor:pointer;font-size:11px;white-space:nowrap;" title="Re-sync">
+        <button class="dir-sync-btn" data-path="${esc(dir.path)}" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text-dim);cursor:pointer;font-size:11px;white-space:nowrap;" title="Re-sync">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg> Sync
         </button>
-        <button onclick="removeDir('${dir.path.replace(/'/g,"\\'")}')" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--red,#dc2626);cursor:pointer;font-size:11px;white-space:nowrap;" title="Remove directory and its files from index">
+        <button class="dir-remove-btn" data-path="${esc(dir.path)}" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--red,#dc2626);cursor:pointer;font-size:11px;white-space:nowrap;" title="Remove directory and its files from index">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
         </button>
       </div>`;
     }).join('');
+    // Bind buttons via addEventListener (avoids inline onclick issues with special chars/encoding)
+    el.querySelectorAll('.dir-remove-btn').forEach(btn=>{
+      btn.addEventListener('click',()=>removeDir(btn.dataset.path));
+    });
+    el.querySelectorAll('.dir-sync-btn').forEach(btn=>{
+      btn.addEventListener('click',()=>resyncDir(btn.dataset.path));
+    });
   }catch(e){
     el.innerHTML='<p style="color:var(--red);font-size:12px;">Error loading directories</p>';
   }
@@ -1426,8 +1433,8 @@ async function toggleDir(el,path,enabled){
 
 async function removeDir(path){
   const msg=curLang==='zh'
-    ?`确定移除 "${path}" 及其所有已索引文件？\n(不会删除原始文件，只从索引中清除)`
-    :`Remove "${path}" and all its indexed files from KBase?\n(Original files will NOT be deleted)`;
+    ?`确定移除该目录及其所有已索引文件？\n(不会删除原始文件，只从索引中清除)`
+    :`Remove this directory and all indexed files?\n(Original files will NOT be deleted)`;
   if(!confirm(msg))return;
   // Immediately remove from DOM (don't wait for backend)
   const dirList=document.getElementById('ingest-dir-list');
