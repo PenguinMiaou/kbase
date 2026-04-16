@@ -1453,6 +1453,12 @@ async function removeDir(path){
       body:JSON.stringify({path:path})});
   }catch(e){}
   loadStats();loadIngestDirs();
+  // Poll stats while backend cleanup runs in background thread
+  let pollCount=0;
+  const statsPoll=setInterval(()=>{
+    loadStats();
+    if(++pollCount>=10)clearInterval(statsPoll);
+  },2000);
 }
 
 function resyncDir(path){
