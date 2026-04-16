@@ -932,7 +932,7 @@ async function newChat(){
 }
 
 async function clearChat(){
-  if(!confirm('Clear conversation?'))return;
+  // confirm() doesn't work in Tauri WebView — skip confirmation
   await api('/api/chat/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversation_id:convId})});
   newChat();
 }
@@ -1335,7 +1335,7 @@ async function loadFileList(){
 }
 
 async function removeFile(path){
-  if(!confirm(curLang==='zh'?'从索引中移除此文件？':'Remove this file from index?'))return;
+  // confirm() doesn't work in Tauri WebView — skip confirmation
   // Immediately remove from UI
   event.target.closest('[style*="border-bottom"]')?.remove();
   // Backend in background
@@ -1447,10 +1447,6 @@ async function toggleDir(el,path,enabled){
 }
 
 async function removeDir(path){
-  const msg=curLang==='zh'
-    ?`确定移除该目录及其所有已索引文件？\n(不会删除原始文件，只从索引中清除)`
-    :`Remove this directory and all indexed files?\n(Original files will NOT be deleted)`;
-  if(!confirm(msg))return;
   // Immediately remove from DOM (don't wait for backend)
   const dirList=document.getElementById('ingest-dir-list');
   if(dirList){
