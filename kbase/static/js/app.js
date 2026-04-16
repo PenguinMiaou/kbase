@@ -1546,6 +1546,8 @@ async function doIngestNew(){
         }else{
           if(fileEl)fileEl.textContent=d.name||'';
         }
+        // Live-update stats + dir file count every 10 files
+        if(d.current%10===0||d.current<=3){loadStats();loadIngestDirs();}
         // ETA calculation
         const eta=document.getElementById('ingest-eta');
         if(eta&&d.current>10&&d.total>0){
