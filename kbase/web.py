@@ -136,18 +136,56 @@ def _generate_preview_cache(file_path: str, file_type: str, cache_path: Path) ->
         return False
 
 
-def _background_generate_previews(workspace: str, delay: int = 60):
-    """Scan all files and generate missing preview caches. Run in background thread.
+# Global preview cache queue + consumer thread (singleton)
+import queue as _queue_mod
+_preview_queue = _queue_mod.Queue()
+_preview_consumer_started = False
 
-    Args:
-        delay: seconds to wait before starting (0 for post-ingest, 60 for startup)
-    """
+
+def _start_preview_consumer(workspace: str):
+    """Start the singleton consumer thread that processes preview cache jobs."""
+    global _preview_consumer_started
+    if _preview_consumer_started:
+        return
+    _preview_consumer_started = True
+    import threading, time as _time
+
+    def _consumer():
+        while True:
+            try:
+                job = _preview_queue.get(timeout=30)
+                if job is None:
+                    continue
+                file_path, file_type, file_id = job
+                cache_path = _get_preview_cache_path(workspace, file_id)
+                if not cache_path.exists() and os.path.isfile(file_path):
+                    _generate_preview_cache(file_path, file_type, cache_path)
+                _preview_queue.task_done()
+                _time.sleep(2)  # Throttle: 2s between conversions
+            except _queue_mod.Empty:
+                continue
+            except Exception:
+                continue
+
+    t = threading.Thread(target=_consumer, daemon=True)
+    t.start()
+
+
+def _enqueue_preview(file_path: str, file_type: str, file_id: str):
+    """Add a file to the preview cache queue (non-blocking)."""
+    ext = file_type.lower()
+    if ext in ('.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls'):
+        _preview_queue.put((file_path, file_type, file_id))
+
+
+def _background_generate_previews(workspace: str, delay: int = 60):
+    """Scan DB for files missing preview cache and enqueue them."""
     import threading, time as _time
 
     def _worker():
         try:
             if delay > 0:
-                _time.sleep(delay)  # Don't hammer CPU right at startup
+                _time.sleep(delay)
             from kbase.config import get_db_path
             import sqlite3
             db_path = get_db_path(workspace)
@@ -160,18 +198,15 @@ def _background_generate_previews(workspace: str, delay: int = 60):
                 "SELECT file_id, file_path, file_type FROM files "
                 "WHERE file_type IN ('.pptx','.ppt','.docx','.doc','.xlsx','.xls')"
             )
-            rows = c.fetchall()
-            conn.close()
-            for row in rows:
+            for row in c.fetchall():
                 cache_path = _get_preview_cache_path(workspace, row["file_id"])
-                if not cache_path.exists() and os.path.isfile(row["file_path"]):
-                    _generate_preview_cache(row["file_path"], row["file_type"], cache_path)
-                    _time.sleep(2)  # Throttle: one file every 2s to avoid CPU spike
+                if not cache_path.exists():
+                    _enqueue_preview(row["file_path"], row["file_type"], row["file_id"])
+            conn.close()
         except Exception:
             pass
 
-    t = threading.Thread(target=_worker, daemon=True)
-    t.start()
+    threading.Thread(target=_worker, daemon=True).start()
 
 
 def _validate_file_path(file_path: str, store=None) -> str:
@@ -422,8 +457,24 @@ def create_app(workspace: str = "default") -> FastAPI:
                     dirs[directory] = {"enabled": True, "last_sync": 0, "file_count": 0, "status": "ingesting"}
                 save_settings(workspace, settings_data)
 
+                _prev_file = [None]  # track previous file for cache queueing
                 def cb(current, total, name, status):
                     q.put(json.dumps({"current": current, "total": total, "name": name, "status": status}))
+                    # Queue preview cache for the PREVIOUS file (it's now fully ingested)
+                    if _prev_file[0] and _prev_file[0] != name:
+                        prev = _prev_file[0]
+                        ext = os.path.splitext(prev)[1].lower()
+                        if ext in ('.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls'):
+                            # Look up file_id from DB
+                            try:
+                                c2 = store.conn.cursor()
+                                c2.execute("SELECT file_id, file_path FROM files WHERE file_name=? LIMIT 1", (prev,))
+                                row2 = c2.fetchone()
+                                if row2:
+                                    _enqueue_preview(row2["file_path"], ext, row2["file_id"])
+                            except Exception:
+                                pass
+                    _prev_file[0] = name
                 stats = ingest_directory(store, directory, force=force, progress_callback=cb)
                 # Update directory status on completion
                 settings_data = load_settings(workspace)
@@ -2350,7 +2401,8 @@ print(path)
         """Legacy UI"""
         return FRONTEND_HTML
 
-    # Background: generate preview caches for files that need it
+    # Start preview cache consumer thread + scan for missing caches after 60s
+    _start_preview_consumer(workspace)
     _background_generate_previews(workspace)
 
     return app
